@@ -1,0 +1,652 @@
+[
+ {
+  "author":{
+   "login":"jpivarski"
+  },
+  "body":"## New features\r\n\r\n* feat: supply a pre-calculated base form to avoid file opening by @lgray in https://github.com/scikit-hep/uproot5/pull/1077\r\n\r\n## Bug-fixes and performance\r\n\r\n_(none!)_\r\n\r\n## Other\r\n\r\n* test: xrootd server fixture by @lobis in https://github.com/scikit-hep/uproot5/pull/1076\r\n* test: fsspec cache by @lobis in https://github.com/scikit-hep/uproot5/pull/1075\r\n\r\n**Full Changelog**: https://github.com/scikit-hep/uproot5/compare/v5.2.0...v5.2.1\n\n<hr /><em>This discussion was created from the release <a href='https://github.com/scikit-hep/uproot5/releases/tag/v5.2.1'>Version 5.2.1</a>.</em>",
+  "comments":{
+   "nodes":[],
+   "totalCount":0
+  },
+  "createdAt":"2024-01-03T21:31:49Z",
+  "number":1078,
+  "title":"Version 5.2.1",
+  "url":"https://github.com/scikit-hep/uproot5/discussions/1078"
+ },
+ {
+  "author":{
+   "login":"kondratyevd"
+  },
+  "body":"Hi, I would like to read a single column from a ROOT file using `uproot` and measure its size in bytes. I am interested in both the disk size taken by the column in the ROOT file, and the RAM usage when it is loaded into memory; as I understand, those will not be the same due to compression in ROOT files.\r\n\r\nWhat is the best way to achieve this?\r\n\r\nI am currently using `uproot==4.3.7`, but either `uproot4` or `uproot5` solution would work.",
+  "comments":{
+   "nodes":[
+    {
+     "author":{
+      "login":"jpivarski"
+     },
+     "body":"After opening the file and selecting the TBranch like this:\r\n\r\n```python\r\nfile = uproot.open(\"PATH/TO/FILE.root\")\r\ntree = file[\"TREE_NAME\"]\r\nbranch = tree[\"BRANCH_NAME\"]\r\n```\r\n\r\n(replacing everything in UPPERCASE), you can get the compressed size on disk with [branch.compressed_bytes](https://uproot.readthedocs.io/en/latest/uproot.behaviors.TBranch.TBranch.html#compressed-bytes), the uncompressed size with [branch.uncompressed_bytes](https://uproot.readthedocs.io/en/latest/uproot.behaviors.TBranch.TBranch.html#uncompressed-bytes), and you can read the data into an array with [array = branch.array()](https://uproot.readthedocs.io/en/latest/uproot.behaviors.TBranch.TBranch.html#array) and then look at the array's number of bytes with `array.nbytes`.\r\n\r\nIf you pass `library=\"np\"` to the `array` function, it will be a NumPy array, for which `nbytes` counts the size of the single buffer in memory only (so if it's not numerical data and it gets materialized as Python objects in an array with `dtype=object`, the `nbytes` will only count the pointers to those Python objects, not the data itself).\r\n\r\nIf you don't pass anything or pass `library=\"ak\"` to the `array` function, it will be an Awkward Array, for which `nbytes` adds up the sizes of all of its constituent buffers. If the data type in the TBranch is simple, the NumPy `nbytes` would be equal to the Awkward `nbytes`. You can see the internal structure of an Awkward Array (to know how many and which buffers it's made of) by asking for `array.layout`.\r\n\r\nThe size is affected by more than just compression. The TBranch data is stored in chunks called TBaskets, and each TBasket has a header, which is usually less than 100 bytes and some of it sits outside of the compressed part. The values returned by the `compressed_bytes` and `uncompressed_bytes` properties are numbers in the ROOT file, ROOT's own reporting, and the array returned by the `array` function is made by decompressing and interpreting each TBasket, followed by concatenating the parts. If you need to dig deeper, you can look at [branch.num_baskets](https://uproot.readthedocs.io/en/latest/uproot.behaviors.TBranch.TBranch.html#num-baskets) and similar functions to examine each TBasket.",
+     "createdAt":"2024-01-12T21:17:50Z",
+     "number":8114370,
+     "replies":{
+      "nodes":[],
+      "totalCount":0
+     }
+    },
+    {
+     "author":{
+      "login":"kondratyevd"
+     },
+     "body":"@jpivarski thanks a lot for such a detailed answer! I have a couple of follow-up questions:\r\n1. Are there any caveats here to keep in mind in case of nested branches (leaves?), e.g. `tree[\"Muon\"][\"pt\"]`, or is this equivalent to the case where branches are not nested?\r\n2. In your opinion, what could be the minimal example of accessing all of the actual data in a given column? Naively, I would use some simple operation such as `np.mean()`.",
+     "createdAt":"2024-01-17T21:12:16Z",
+     "number":8161890,
+     "replies":{
+      "nodes":[
+       {
+        "author":{
+         "login":"jpivarski"
+        },
+        "body":"1. No caveats for nested TBranches. The TBranch nesting is just how the metadata are organized in the TTree object, and the data they point to in TBaskets is a separate thing. In fact, most TBranches that contain TBranches don't have any associated data. (TBranches representing TClonesArray is one exception, but this is _usually_ true.) The TLeaf class is purely metadata and has no associated data; despite these names, a more useful way to think about them is:\r\n\r\n* **TBranch:** one array/column of data that can be selectively read in chunks (TBaskets). A TBranch can contain arbitrarily many TBranches, and if it contains zero TBranches, then in normal CS tree terminology, it's a \"leaf.\"\r\n* **TLeaf:** metadata that describes the data type, either exclusively (e.g. `TLeafI` means that the data type is `int32_t`) or non-exclusively, if part of the data type is described by TStreamerInfo, or in the TBranch's title, etc. Multiple TLeaves corresponds to NumPy's concept of a [structured array](https://numpy.org/doc/stable/user/basics.rec.html), which in C is an array of `structs`.\r\n\r\n2. As soon as you call [uproot.TBranch.array](https://uproot.readthedocs.io/en/latest/uproot.behaviors.TBranch.TBranch.html#array) or [uproot.TTree.arrays](https://uproot.readthedocs.io/en/latest/uproot.behaviors.TTree.TTree.html#arrays) (or similar), the array is loaded into memory\u2014all values have been accessed. You don't have to compute anything on them.\r\n\r\nSince this is Python, nothing gets optimized away: even if you request the data and then do nothing with it, Uproot will still go through the process of reading the data from disk, decompressing, interpreting, and forming an array. In compiled languages, I often sum over the values and print them out to ensure that the compiler doesn't remove the code that I want to performance-test, but that's not necessary here. Still, if you want to do it anyway, summation is one of the least expensive things you can do.[^1]\r\n\r\n[^1]: A compiled `+` operation is approximately 1 clock tick, approximately 1 nanosecond, and if you do a reduction, `np.sum` instead of `np.add`, then no new arrays need to be created to store the output. Division is maybe 20 times more expensive, but in `np.mean` it's only done once, so it hardly matters. What's going to matter more than anything else is paging the data from RAM into the CPU.",
+        "createdAt":"2024-01-17T23:21:12Z",
+        "number":8162926
+       }
+      ],
+      "totalCount":1
+     }
+    }
+   ],
+   "totalCount":2
+  },
+  "createdAt":"2024-01-12T20:22:27Z",
+  "number":1081,
+  "title":"How to measure size (in bytes) of a column read from a ROOT file?",
+  "url":"https://github.com/scikit-hep/uproot5/discussions/1081"
+ },
+ {
+  "author":{
+   "login":"gordonwatts"
+  },
+  "body":"## Reproducing:\r\n\r\nYou need a small root file - like `myfile.root`. I'm going to assume the tree in `myfile.root` you want to open is called `mytree`:\r\n\r\n1. rename `myfile.root` to `myfile.root.1`\r\n2. In python, run:\r\n   import uproot\r\n   uproot.dask('myfile.root.1:mytree')\r\n3. You'll get file-not-found exception.\r\n\r\n## Why would you name a file like this?\r\n\r\nThe ATLAS production system often names files with the `.1` for whatever reason. As a result, I often find myself accessing files with names like that.\r\n\r\n## Workaround\r\n\r\nUse the dictionary specification method: `uproot.dask({ 'myfile.root.1': 'mytree'})`",
+  "comments":{
+   "nodes":[
+    {
+     "author":{
+      "login":"agoose77"
+     },
+     "body":"@gordonwatts thanks for reporting this! I suspect this will follow from recent changes to our file name handling. @lobis any clues? :)",
+     "createdAt":"2024-01-24T15:16:59Z",
+     "number":8236041,
+     "replies":{
+      "nodes":[],
+      "totalCount":0
+     }
+    },
+    {
+     "author":{
+      "login":"lobis"
+     },
+     "body":"Yes, this is expected behaviour that was added at some point in the 5.2.0 release. There should be a mention in the release notes but I haven't checked (at least there was a PR with this).\r\n\r\nWe chose to only support files ending in `.root` when the `file:object` syntax is used. We chose to do this because it was not possible to support the same kind of complex url-chain patterns that fsspec supports if we had to also support the `file:object` syntax (it may be possible but very complex and prone to error). In clonclusion: `file:object` syntax won't work if the files does not end in `.root` and this is intended.\r\n\r\nYou can always use the `dict` syntax (`{\"file.root.1\": \"object\"}`) to achieve the same effect (I actually prefer this) and this will work regardless of the file extension.",
+     "createdAt":"2024-01-24T15:26:04Z",
+     "number":8236042,
+     "replies":{
+      "nodes":[],
+      "totalCount":0
+     }
+    },
+    {
+     "author":{
+      "login":"jpivarski"
+     },
+     "body":"That's right: the colon syntax has been hard to maintain, so Uproot 5.2.x simplified it. I used to keep a list of Issues and Discussions about it, but it's more than a dozen now. Page 19 of [this talk](https://indico.jlab.org/event/459/contributions/11547/) shows a screenshot of all those issues and an analysis of user code, which demonstrates that people do use it and we can't get rid of it.\r\n\r\nSo now we only support `path/in/filesystem.root:path/inside/file` if the filesystem name ends in `.root`. If it doesn't, that's what the `{\"path/in/filesystem.root\": \"path/inside/file\"}` syntax is for\u2014it's not a workaround, it's the intended use.\r\n\r\nI'm going to make this a Discussion because it's not a work-item but it would be useful for others to (hopefully) find if they run into it.",
+     "createdAt":"2024-01-24T17:48:05Z",
+     "number":8236043,
+     "replies":{
+      "nodes":[],
+      "totalCount":0
+     }
+    },
+    {
+     "author":{
+      "login":"gordonwatts"
+     },
+     "body":"Thanks! This makes sense. I like the dictionary approach better as well. I just couldn't understand why it was failing. Perhaps a possible addition could be if you find a colon in the filename that doesn't have root next to it and the file doesn't exist, that the `file:tree` form is not allowed if your file doesn't end in root.\r\n\r\nMy impression from the docs is that you lose functionality when you do this - you can't chunk a file automatically any longer with this dictionary syntax. Is that right? I'd like to do something like tell `dask` to chunk files by 10,000 events when it opens them. The docs seem to say that if you use the dictionary format that you have to actually specify the ranges, which means opening each file, loading the object, determining the length, closing it, and then giving the per-file chunk boundaries to uproot.\r\n\r\nI am specifically referring to this line in the `uproot.dask` documentation: `This files pattern is incompatible with step_size and steps_per_file.`. That makes me think I can't use `step_size` or `steps_per_file` in addition with the dictionary input.",
+     "createdAt":"2024-01-24T22:20:36Z",
+     "number":8238291,
+     "replies":{
+      "nodes":[],
+      "totalCount":0
+     }
+    }
+   ],
+   "totalCount":4
+  },
+  "createdAt":"2024-01-24T01:37:30Z",
+  "number":1097,
+  "title":"Uproot.dask fails to open files with names like `myfile.root.1`",
+  "url":"https://github.com/scikit-hep/uproot5/discussions/1097"
+ },
+ {
+  "author":{
+   "login":"lgray"
+  },
+  "body":"reproducer:\r\n\r\n```python3\r\nimport uproot\r\n\r\nfor _ in range(200):\r\n    uproot.dask({\r\n\t\"https://github.com/CoffeaTeam/coffea/raw/master/tests/samples/nano_dy.root\": \"Events\"\r\n    })\r\n```\r\n\r\nThis particular instance leaks ~30MB per open. This adds up very quickly if you need to extract the form of hundreds of files in a remote process as evident from https://github.com/CoffeaTeam/coffea/issues/1007 where this bug manifested pretty nastily.",
+  "comments":{
+   "nodes":[
+    {
+     "author":{
+      "login":"jpivarski"
+     },
+     "body":"This is true, and the memory use in `uproot.dask` is over and above `uproot.open` (and getting the TTree metadata).\r\n\r\n```python\r\nimport gc\r\nimport psutil\r\nimport uproot\r\n\r\nthis_process = psutil.Process()\r\n\r\ndef memory_diff(task):\r\n    gc.disable()\r\n    gc.collect()\r\n    start_memory = this_process.memory_full_info().uss\r\n    task()\r\n    gc.collect()\r\n    stop_memory = this_process.memory_full_info().uss\r\n    gc.enable()\r\n    return stop_memory - start_memory\r\n\r\ndef task():\r\n    with uproot.open(\r\n        {\"https://github.com/CoffeaTeam/coffea/raw/master/tests/samples/nano_dy.root\": \"Events\"}\r\n    ) as tree:\r\n        pass\r\n\r\nfor _ in range(200):\r\n    print(f\"{memory_diff(task) * 1e-6:.3f} MB\")\r\n```\r\n\r\nreports\r\n\r\n```\r\n28.156 MB\r\n1.483 MB\r\n0.000 MB\r\n0.008 MB\r\n0.012 MB\r\n0.004 MB\r\n3.932 MB\r\n0.262 MB\r\n0.000 MB\r\n0.000 MB\r\n0.000 MB\r\n-1.040 MB\r\n0.000 MB\r\n0.803 MB\r\n0.246 MB\r\n0.000 MB\r\n0.000 MB\r\n0.000 MB\r\n0.000 MB\r\n-1.040 MB\r\n0.807 MB\r\n0.242 MB\r\n0.004 MB\r\n0.000 MB\r\n0.000 MB\r\n0.000 MB\r\n...\r\n```\r\n\r\nChange the `task` to\r\n\r\n```python\r\ndef task():\r\n    tree = uproot.open(\r\n        {\"https://github.com/CoffeaTeam/coffea/raw/master/tests/samples/nano_dy.root\": \"Events\"}\r\n    )\r\n```\r\n\r\nso that it leaks file handles, and it's\r\n\r\n```\r\n26.059 MB\r\n1.499 MB\r\n0.004 MB\r\n0.012 MB\r\n0.033 MB\r\n0.004 MB\r\n0.000 MB\r\n-0.012 MB\r\n6.046 MB\r\n0.258 MB\r\n0.004 MB\r\n0.000 MB\r\n-1.049 MB\r\n0.008 MB\r\n-1.049 MB\r\n0.000 MB\r\n0.000 MB\r\n...\r\n```\r\n\r\nWe'd eventually run out of file handles this way, but apparently not memory (on the MB scale).\r\n\r\nNow\r\n\r\n```python\r\ndef task():\r\n    lazy = uproot.dask(\r\n        {\"https://github.com/CoffeaTeam/coffea/raw/master/tests/samples/nano_dy.root\": \"Events\"}\r\n    )\r\n```\r\n\r\n```\r\n87.364 MB\r\n27.988 MB\r\n25.252 MB\r\n28.987 MB\r\n25.227 MB\r\n26.903 MB\r\n25.219 MB\r\n30.024 MB\r\n23.155 MB\r\n27.898 MB\r\n26.325 MB\r\n28.975 MB\r\n24.158 MB\r\n28.991 MB\r\n...\r\n```\r\n\r\nThis is a problem. (Also, it's noticeably slower, though there might be good reasons for that.)\r\n\r\nUsing [Pympler](https://pympler.readthedocs.io/en/latest/),\r\n\r\n```python\r\n>>> import gc\r\n>>> import pympler.tracker\r\n>>> import uproot\r\n>>> \r\n>>> summary_tracker = pympler.tracker.SummaryTracker()\r\n>>> \r\n>>> # run it once to get past the necessary first-time things (filling uproot.classes, etc.)\r\n>>> lazy = uproot.dask(\r\n...     {\"https://github.com/CoffeaTeam/coffea/raw/master/tests/samples/nano_dy.root\": \"Events\"}\r\n... )\r\n>>> del lazy\r\n>>> gc.collect()\r\n0\r\n>>> # run print_diff enough times to get to the quiescent state\r\n>>> summary_tracker.print_diff()\r\n...\r\n>>> summary_tracker.print_diff()\r\n  types |   # objects |   total size\r\n======= | =========== | ============\r\n>>> \r\n>>> # what does an Uproot Dask array bring in?\r\n>>> lazy = uproot.dask(\r\n...     {\"https://github.com/CoffeaTeam/coffea/raw/master/tests/samples/nano_dy.root\": \"Events\"}\r\n... )\r\n>>> summary_tracker.print_diff()\r\n                                            types |   # objects |   total size\r\n================================================= | =========== | ============\r\n                                             dict |       72059 |     11.54 MB\r\n                                            bytes |           3 |      5.66 MB\r\n                                             list |       24007 |      1.73 MB\r\n                                      numpy.int64 |       37491 |      1.14 MB\r\n                      uproot.source.cursor.Cursor |       21000 |    984.38 KB\r\n                                    numpy.ndarray |        4501 |    492.30 KB\r\n                                              str |        4886 |    436.10 KB\r\n              uproot.models.TObject.Model_TObject |        5999 |    281.20 KB\r\n                                            tuple |        3385 |    147.00 KB\r\n          uproot.models.TObjArray.Model_TObjArray |        3000 |    140.62 KB\r\n                uproot.models.TNamed.Model_TNamed |        2999 |    140.58 KB\r\n                                        frozenset |           1 |    128.21 KB\r\n                                              int |        3492 |     95.51 KB\r\n      awkward._nplikes.typetracer.TypeTracerArray |        1878 |     88.03 KB\r\n  uproot.models.TTree.Model_ROOT_3a3a_TIOFeatures |        1500 |     70.31 KB\r\n>>> \r\n>>> # what goes away when we delete it?\r\n>>> del lazy\r\n>>> gc.collect()\r\n14\r\n>>> gc.collect()\r\n0\r\n>>> summary_tracker.print_diff()\r\n                                         types |   # objects |   total size\r\n============================================== | =========== | ============\r\n                                          code |           0 |     37     B\r\n                  aiohttp.helpers.TimerContext |          -1 |    -48     B\r\n      awkward.contents.recordarray.RecordArray |          -1 |    -48     B\r\n            dask.highlevelgraph.HighLevelGraph |          -1 |    -48     B\r\n             dask_awkward.utils.LazyInputsDict |          -1 |    -48     B\r\n               dask.blockwise.BlockwiseDepDict |          -1 |    -48     B\r\n                       awkward.highlevel.Array |          -1 |    -48     B\r\n  dask_awkward.layers.layers.AwkwardInputLayer |          -1 |    -48     B\r\n                   dask_awkward.lib.core.Array |          -1 |    -48     B\r\n                asyncio.trsock.TransportSocket |          -2 |    -80     B\r\n                                 ssl.SSLObject |          -2 |    -96     B\r\n                  aiohttp.streams.StreamReader |          -2 |    -96     B\r\n                  asyncio.sslproto.SSLProtocol |          -2 |    -96     B\r\n                     asyncio.sslproto._SSLPipe |          -2 |    -96     B\r\n                                     bytearray |          -2 |   -112     B\r\n```\r\n\r\nHardly anything goes away when `lazy` is deleted! That's not good!\r\n\r\nThis TTree has 1499 TBranches. So having approximately that many TIOFeatures, TypeTracerArray, twice that many Model_TNamed, Model_TObjArray (TBranch and TLeaf), and four times as many Model_TObject make sense.\r\n\r\nThere are only 3 bytes objects, but they comprise 5.66 MB. I don't know, offhand, what they could be, but I think they're more likely Uproot than Dask. There are a lot of big dicts, which is not too surprising, and I can't say offhand whether I expect more in Uproot or more in Dask.\r\n\r\nThe one, major problem is that `del lazy` followed by `gc.collect()` does not get rid of as many objects as were brought in. It may be reasonable for the dask-awkward array of a large TTree to be 30 MB, but it's not reasonable for it to still be around after deleting.\r\n\r\nWho gets a reference to it and doesn't let go? It might be possible to find out with `gc.get_referrers`, but it might not be at the level of `lazy` (the `ak.Array` and `dak.Array` are listed as objects that go away). Let me think about that...",
+     "createdAt":"2024-01-23T18:32:48Z",
+     "number":8237332,
+     "replies":{
+      "nodes":[],
+      "totalCount":0
+     }
+    },
+    {
+     "author":{
+      "login":"jpivarski"
+     },
+     "body":"Okay, setting up to follow this object with `gc.get_referrers`,\r\n\r\n```python\r\n>>> import uproot\r\n>>> import gc\r\n>>> lazy = uproot.dask(\r\n...     {\"https://github.com/CoffeaTeam/coffea/raw/master/tests/samples/nano_dy.root\": \"Events\"}\r\n... )\r\n>>> type(lazy)\r\n<class 'dask_awkward.lib.core.Array'>\r\n>>> type(lazy._meta)\r\n<class 'awkward.highlevel.Array'>\r\n```\r\n\r\nI'll be looking at lists and one reference will be the list I'm using to look at it, so I make that a special class that's easier to ignore in a print-out of type names.\r\n\r\n```python\r\n>>> class IgnoreMeList(list):\r\n...     pass\r\n... \r\n>>> def show(follow):\r\n...     print(\"\\n\".join(f\"{i:2d} {type(x).__module__}.{type(x).__name__}\" for i, x in enumerate(follow)))\r\n... \r\n```\r\n\r\nIn the Pympler output, we saw that the TypeTracerArrays were not deleted when `lazy` went out of scope (and `gc.collect()` was called). So this is a good starting point to walk outward and find out who's holding a reference to it.\r\n\r\n```python\r\n>>> follow = IgnoreMeList([lazy._meta.layout.content(\"Muon_pt\").content.data])\r\n>>> show(follow)\r\n 0 awkward._nplikes.typetracer.TypeTracerArray\r\n```\r\n\r\nNow I'll just walk along the graph of its referrers, ignoring the `IgnoreMeList` because that's the `follow` list itself, and seeing what else is in the list.\r\n\r\n```python\r\n>>> follow = IgnoreMeList(gc.get_referrers(follow[0]))\r\n>>> show(follow)\r\n 0 __main__.IgnoreMeList\r\n 1 builtins.dict\r\n>>> \r\n>>> follow = IgnoreMeList(gc.get_referrers(follow[1]))\r\n>>> show(follow)\r\n 0 __main__.IgnoreMeList\r\n 1 awkward.contents.numpyarray.NumpyArray\r\n>>> \r\n>>> follow = IgnoreMeList(gc.get_referrers(follow[1]))\r\n>>> show(follow)\r\n 0 __main__.IgnoreMeList\r\n 1 builtins.dict\r\n>>> \r\n>>> follow = IgnoreMeList(gc.get_referrers(follow[1]))\r\n>>> show(follow)\r\n 0 __main__.IgnoreMeList\r\n 1 awkward.contents.listoffsetarray.ListOffsetArray\r\n>>> \r\n>>> follow = IgnoreMeList(gc.get_referrers(follow[1]))\r\n>>> show(follow)\r\n 0 __main__.IgnoreMeList\r\n 1 builtins.list\r\n>>> \r\n>>> follow = IgnoreMeList(gc.get_referrers(follow[1]))\r\n>>> show(follow)\r\n 0 builtins.dict\r\n 1 __main__.IgnoreMeList\r\n>>> \r\n>>> follow = IgnoreMeList(gc.get_referrers(follow[0]))\r\n>>> show(follow)\r\n 0 awkward.contents.recordarray.RecordArray\r\n 1 __main__.IgnoreMeList\r\n>>> \r\n>>> follow = IgnoreMeList(gc.get_referrers(follow[0]))\r\n>>> show(follow)\r\n 0 builtins.dict\r\n 1 __main__.IgnoreMeList\r\n>>> \r\n>>> follow = IgnoreMeList(gc.get_referrers(follow[0]))\r\n>>> show(follow)\r\n 0 awkward.highlevel.Array\r\n 1 __main__.IgnoreMeList\r\n>>> \r\n>>> follow = IgnoreMeList(gc.get_referrers(follow[0]))\r\n>>> show(follow)\r\n 0 builtins.dict\r\n 1 __main__.IgnoreMeList\r\n>>> \r\n>>> follow = IgnoreMeList(gc.get_referrers(follow[0]))\r\n>>> show(follow)\r\n 0 dask_awkward.lib.core.Array\r\n 1 __main__.IgnoreMeList\r\n>>> \r\n>>> follow = IgnoreMeList(gc.get_referrers(follow[0]))\r\n>>> show(follow)\r\n 0 __main__.IgnoreMeList\r\n 1 builtins.dict\r\n>>> \r\n>>> follow = IgnoreMeList(gc.get_referrers(follow[1]))\r\n>>> show(follow)\r\n 0 builtins.function\r\n 1 builtins.dict\r\n 2 __main__.IgnoreMeList\r\n 3 builtins.module\r\n```\r\n\r\nOkay! The dict and the module are just `__main__`:\r\n\r\n```python\r\n>>> follow[3]\r\n<module '__main__' (built-in)>\r\n>>> follow[1].keys()\r\ndict_keys(['use_main_ns', 'namespace', 'matches'])\r\n>>> follow[1][\"use_main_ns\"]\r\n1\r\n>>> follow[1][\"matches\"]\r\n['follow']\r\n>>> type(follow[1][\"namespace\"])\r\n<class 'dict'>\r\n>>> follow[1][\"namespace\"].keys()\r\ndict_keys(['__name__', '__doc__', '__package__', '__loader__', '__spec__', '__annotations__', '__builtins__', 'uproot', 'gc', 'lazy', 'IgnoreMeList', 'show', 'follow'])\r\n```\r\n\r\nSo what about the function?\r\n\r\n```python\r\n>>> follow[0]\r\n<function show at 0x77a70b5889d0>\r\n```\r\n\r\nNope. All of this is either Python's infrastructure or the infrastructure I set up in the `__main__` namespace.\r\n\r\nSo what gives? I didn't see any other referrers along the way. Who's holding a reference to this object? If nobody is, why isn't it deleted (why is it not negative in the Pympler list) when the `ak.Array` that holds it is deleted?\r\n\r\nDoes anyone have any ideas?",
+     "createdAt":"2024-01-23T19:13:38Z",
+     "number":8237333,
+     "replies":{
+      "nodes":[],
+      "totalCount":0
+     }
+    },
+    {
+     "author":{
+      "login":"jpivarski"
+     },
+     "body":"Even more to the point, following the advice of https://stackoverflow.com/a/28406001/1623645\r\n\r\n```python\r\n>>> import uproot\r\n>>> import gc\r\n>>> lazy = uproot.dask(\r\n...     {\"https://github.com/CoffeaTeam/coffea/raw/master/tests/samples/nano_dy.root\": \"Events\"}\r\n... )\r\n>>> class IgnoreMeList(list):\r\n...     pass\r\n... \r\n>>> def show(follow):\r\n...     print(\"\\n\".join(f\"{i:2d} {type(x).__module__}.{type(x).__name__}\" for i, x in enumerate(follow)))\r\n... \r\n>>> follow = IgnoreMeList([lazy._meta.layout.content(\"Muon_pt\").content.data])\r\n>>> del lazy\r\n>>> gc.collect()\r\n17\r\n>>> gc.collect()\r\n0\r\n>>> show(follow)\r\n 0 awkward._nplikes.typetracer.TypeTracerArray\r\n>>> follow = IgnoreMeList(gc.get_referrers(follow[0]))\r\n>>> gc.collect()\r\n0\r\n>>> show(follow)\r\n 0 __main__.IgnoreMeList\r\n```\r\n\r\nThe TypeTracerArray goes away. I don't know why this disagrees with Pympler (and the fact that 30 MB of USS doesn't go away).",
+     "createdAt":"2024-01-23T19:18:24Z",
+     "number":8237334,
+     "replies":{
+      "nodes":[],
+      "totalCount":0
+     }
+    },
+    {
+     "author":{
+      "login":"agoose77"
+     },
+     "body":"It looks to me like this might be in dask. Add the following to the loop body:\r\n```python\r\nimport gc\r\nimport dask.base\r\ndask.base.function_cache.clear()\r\ngc.collect()\r\n```\r\n\r\nI notice that the total memory usage remains fairly stable.",
+     "createdAt":"2024-01-24T09:45:57Z",
+     "number":8237335,
+     "replies":{
+      "nodes":[],
+      "totalCount":0
+     }
+    },
+    {
+     "author":{
+      "login":"jpivarski"
+     },
+     "body":"If it's referenced in `dask.base.function_cache`, I would have thought that `gc.get_referrers` would have shown us that. Also, clearing this function cache doesn't show the allocated data getting removed in Pympler:\r\n\r\n```python\r\n>>> import gc\r\n>>> import pympler.tracker\r\n>>> import dask.base\r\n>>> import uproot\r\n>>> \r\n>>> summary_tracker = pympler.tracker.SummaryTracker()\r\n>>> \r\n>>> lazy = uproot.dask(\r\n...     {\"https://github.com/CoffeaTeam/coffea/raw/master/tests/samples/nano_dy.root\": \"Events\"}\r\n... )\r\n>>> del lazy\r\n>>> gc.collect()\r\n3\r\n>>> gc.collect()\r\n0\r\n>>> summary_tracker.print_diff()\r\n#                         ... several times ...                         #\r\n>>> summary_tracker.print_diff()\r\n  types |   # objects |   total size\r\n======= | =========== | ============\r\n>>> lazy = uproot.dask(\r\n...     {\"https://github.com/CoffeaTeam/coffea/raw/master/tests/samples/nano_dy.root\": \"Events\"}\r\n... )\r\n>>> summary_tracker.print_diff()\r\n                                        types |   # objects |   total size\r\n============================================= | =========== | ============\r\n                                         dict |       72060 |     11.54 MB\r\n                                        bytes |           3 |      5.66 MB\r\n                                         list |       24007 |      1.73 MB\r\n                                  numpy.int64 |       37491 |      1.14 MB\r\n                  uproot.source.cursor.Cursor |       21000 |    984.38 KB\r\n                                numpy.ndarray |        4501 |    492.30 KB\r\n                                          str |        4886 |    436.10 KB\r\n          uproot.models.TObject.Model_TObject |        5999 |    281.20 KB\r\n                                        tuple |        3385 |    147.00 KB\r\n      uproot.models.TObjArray.Model_TObjArray |        3000 |    140.62 KB\r\n            uproot.models.TNamed.Model_TNamed |        2999 |    140.58 KB\r\n                                    frozenset |           1 |    128.21 KB\r\n                                          int |        3490 |     95.45 KB\r\n  awkward._nplikes.typetracer.TypeTracerArray |        1878 |     88.03 KB\r\n         uproot.models.TAtt.Model_TAttFill_v2 |        1500 |     70.31 KB\r\n>>> del lazy\r\n>>> dask.base.function_cache.clear()   # clearing Dask's function cache\r\n>>> gc.collect()\r\n221296\r\n>>> gc.collect()\r\n0\r\n>>> summary_tracker.print_diff()\r\n                                         types |   # objects |   total size\r\n============================================== | =========== | ============\r\n                                          code |           0 |     37     B\r\n                       awkward.highlevel.Array |          -1 |    -48     B\r\n               dask.blockwise.BlockwiseDepDict |          -1 |    -48     B\r\n                  aiohttp.helpers.TimerContext |          -1 |    -48     B\r\n      awkward.contents.recordarray.RecordArray |          -1 |    -48     B\r\n  dask_awkward.layers.layers.AwkwardInputLayer |          -1 |    -48     B\r\n            dask.highlevelgraph.HighLevelGraph |          -1 |    -48     B\r\n                   dask_awkward.lib.core.Array |          -1 |    -48     B\r\n             dask_awkward.utils.LazyInputsDict |          -1 |    -48     B\r\n                asyncio.trsock.TransportSocket |          -2 |    -80     B\r\n                     asyncio.sslproto._SSLPipe |          -2 |    -96     B\r\n                     fsspec.caching.BytesCache |          -2 |    -96     B\r\n                                 ssl.SSLObject |          -2 |    -96     B\r\n           uproot._dask.TrivialFormMappingInfo |          -2 |    -96     B\r\n           uproot.models.TTree.Model_TTree_v20 |          -2 |    -96     B\r\n```\r\n\r\nIt's still the case that creating `lazy` adds 30 MB of TTree metadata objects and deleting it _and_ the functions from the function cache doesn't make them appear with a minus sign in Pympler.\r\n\r\nOh, but the total USS memory usage does go down:\r\n\r\n```python\r\nimport gc\r\nimport psutil\r\nimport dask.base\r\nimport uproot\r\n\r\nthis_process = psutil.Process()\r\n\r\ndef memory_diff(task):\r\n    gc.disable()\r\n    gc.collect()\r\n    start_memory = this_process.memory_full_info().uss\r\n    task()\r\n    gc.collect()\r\n    stop_memory = this_process.memory_full_info().uss\r\n    gc.enable()\r\n    return stop_memory - start_memory\r\n\r\ndef task():\r\n    lazy = uproot.dask(\r\n        {\"https://github.com/CoffeaTeam/coffea/raw/master/tests/samples/nano_dy.root\": \"Events\"}\r\n    )\r\n    del lazy\r\n    dask.base.function_cache.clear()\r\n\r\nfor _ in range(200):\r\n    print(f\"{memory_diff(task) * 1e-6:.3f} MB\")\r\n```\r\n\r\nresults in\r\n\r\n```\r\n62.751 MB\r\n18.416 MB\r\n1.073 MB\r\n-3.138 MB\r\n2.105 MB\r\n0.053 MB\r\n-2.064 MB\r\n2.077 MB\r\n-1.032 MB\r\n0.000 MB\r\n2.109 MB\r\n-4.170 MB\r\n4.174 MB\r\n-2.077 MB\r\n-0.020 MB\r\n0.020 MB\r\n1.016 MB\r\n-1.008 MB\r\n-0.016 MB\r\n0.016 MB\r\n2.089 MB\r\n-2.073 MB\r\n2.085 MB\r\n...\r\n```\r\n\r\nwhereas removing the `function_cache.clear()` results in\r\n\r\n```\r\n79.806 MB\r\n27.992 MB\r\n25.338 MB\r\n30.044 MB\r\n21.045 MB\r\n30.056 MB\r\n23.114 MB\r\n31.076 MB\r\n24.187 MB\r\n27.918 MB\r\n24.207 MB\r\n26.882 MB\r\n26.259 MB\r\n...\r\n```\r\n\r\nSo that _is_ what's holding all of the memory. It must be some connection that Python doesn't see\u2014maybe it goes through a reference in an extension module? (Maybe it goes through a NumPy object array? numpy/numpy#6581)\r\n\r\nSince this is a Dask feature, what do we want to do about it? @lgray, would it be sufficient to have Coffea clear the Dask function cache?",
+     "createdAt":"2024-01-24T19:24:22Z",
+     "number":8237336,
+     "replies":{
+      "nodes":[],
+      "totalCount":0
+     }
+    },
+    {
+     "author":{
+      "login":"lgray"
+     },
+     "body":"That'll certainly fix it for coffea.\r\n\r\nOne thing I noticed in function_cache is that it's holding the uncompressed `pickle` of the function and the dask.base.tokenize for the function key changes with every uproot.dask open.\r\n\r\nThat's probably why we don't see a connection to `lazy` above.",
+     "createdAt":"2024-01-24T20:00:30Z",
+     "number":8237337,
+     "replies":{
+      "nodes":[],
+      "totalCount":0
+     }
+    },
+    {
+     "author":{
+      "login":"jpivarski"
+     },
+     "body":"That's it then! That's why it costs memory, but can't be seen as objects of the expected types.\r\n\r\nSo, in the end, the recommendation for everyone is to check their Dask function cache. I'll convert this into a Discussion as a way for others to find this conclusion.\r\n\r\n---------------\r\n\r\nActually, it could\u2014possibly\u2014be fixed in Uproot by replacing the TTree metadata data structure with a streamlined data structure containing only that which is necessary to fetch arrays. (Mostly the `fBasketSeek`, etc.)\r\n\r\n```python\r\n>>> import sys\r\n>>> import uproot\r\n>>> tree = uproot.open(\r\n...     {\"https://github.com/CoffeaTeam/coffea/raw/master/tests/samples/nano_dy.root\": \"Events\"}\r\n... )\r\n>>> minimal = {}\r\n>>> for k, v in tree.items():\r\n...     minimal[k, \"seek\"] = v.member(\"fBasketSeek\")[:v.num_baskets]\r\n...     minimal[k, \"bytes\"] = v.member(\"fBasketBytes\")[:v.num_baskets]\r\n...     minimal[k, \"entry\"] = v.member(\"fBasketEntry\")[:v.num_baskets + 1]\r\n... \r\n>>> sum(sys.getsizeof(k) + sys.getsizeof(v) for k, v in minimal.items()) / 1024**2\r\n0.7204971313476562\r\n```\r\n\r\ni.e. something like 0.7 MiB for this file, but larger if it had more baskets. It's likely that I'm forgetting some other essential metadata, which would bring this figure up.",
+     "createdAt":"2024-01-24T20:22:37Z",
+     "number":8237338,
+     "replies":{
+      "nodes":[
+       {
+        "author":{
+         "login":"lgray"
+        },
+        "body":"That would be overall a really nice improvement in cases where we don't want to purge the function cache, like standard task-graph building.\r\n\r\nIn my specific case for preprocessing data I am *never* going to build a taskgraph from the `uproot.dask` returned object and so I can freely purge it with no deleterious effect.\r\n\r\nWhat a weird bit of detective work this was.",
+        "createdAt":"2024-01-24T20:52:36Z",
+        "number":8237567
+       }
+      ],
+      "totalCount":1
+     }
+    }
+   ],
+   "totalCount":7
+  },
+  "createdAt":"2024-01-23T05:09:11Z",
+  "number":1098,
+  "title":"Every `uproot.dask` call increases memory footprint by 30 MB (it's in `dask.base.function_cache`)",
+  "url":"https://github.com/scikit-hep/uproot5/discussions/1098"
+ },
+ {
+  "author":{
+   "login":"JacekHoleczek"
+  },
+  "body":"I am trying to write a small python macro that should \"demonstrate\" that uproot is (almost) as fast as C++.\r\nCould you please give me advice on how to improve it?\r\n\r\nHow can one make this code run even \"faster\"?\r\n\r\nCan one somehow set the \"title\" of the created hist.Hist?\r\nIf not, can one somehow set the \"title\" of the generated TH1D histogram (when writing the hist.Hist to a ROOT file)?\r\n\r\nIn a second step later ...\r\nI assume that each time I ask for some \"array\", uproot will fully load all TTree entries corresponding to the requested branch into RAM. What would be the easiest way to change this code so that the RAM usage was kept \"small\" (but still running with good performance), even when analyzing giant trees (i.e., with very many entries)?\r\n\r\n```python\r\nimport uproot\r\nimport numpy as np\r\nimport hist\r\n\r\ndef process():\r\n        # open the ROOT file and load the hk TTree\r\n        with uproot.open({'data/my_tree.root': 'hk'}) as t:\r\n                # test that we can read some available arrays\r\n                tq_real = t.arrays(['TQReal.nhits', 'TQReal.pc2pe', 'TQReal.t0'])\r\n                tq_real_hits = t.arrays(['TQReal.hits.cable', 'TQReal.hits.T', 'TQReal.hits.Q'])\r\n                n_high_hit = np.sum(tq_real_hits['TQReal.hits.Q'] > 1.0)\r\n                print(f'Number of high Q hits: {n_high_hit}')\r\n                # create and fill some histograms\r\n                h_goodness = hist.Hist(hist.axis.Regular(100, 0.0, 1.0, label = 'goodness_time_fit (RecoBonsai)'))\r\n                h_goodness.fill(t['RecoBonsai.goodness_time_fit'].array())\r\n                h_trigger = hist.Hist(hist.axis.Regular(10, 0.0, 10.0, label = 'trigger_id (Header)'))\r\n                h_trigger.fill(t['Header.trigger_id'].array())\r\n                h_goodness_leaf = None\r\n                if 'RecoLEAF.goodness' in t: # RecoLEAF is a new class, not available everywhere\r\n                        h_goodness_leaf = hist.Hist(hist.axis.Regular(100, 0.0, 1.0, label = 'goodness (RecoLEAF)'))\r\n                        h_goodness_leaf.fill(t['RecoLEAF.goodness'].array())\r\n                # write histograms to a ROOT file\r\n                # note: when a new ROOT TH[123]D is created from the\r\n                #       corresponding hist.Hist below, its \"statistics\"\r\n                #       is computed from its bin content (in bare ROOT,\r\n                #       the \"statistics\" is computed at filling time)\r\n                with uproot.recreate('data/output_analysis_tree_python_v1.root') as f_out:\r\n                        f_out['goodness'] = h_goodness\r\n                        f_out['trigger'] = h_trigger\r\n                        if h_goodness_leaf is not None:\r\n                                f_out['goodness_leaf'] = h_goodness_leaf\r\n\r\nif __name__ == '__main__':\r\n        print('Processing')\r\n        process()\r\n        print('Done')\r\n```",
+  "comments":{
+   "nodes":[
+    {
+     "author":{
+      "login":"jpivarski"
+     },
+     "body":"If these arrays are not ragged (i.e. `t[branchname].typename` is a C++ value type, such as `int32_t` or `double`, possibly fixed-size arrays like `float[10]`, but not variable-length arrays like `float[]`), then you can use NumPy with `library=\"np\"` instead of the default Awkward Array, and that would have greater or equal speed.\r\n\r\nBe careful to avoid reading the same data multiple times. I don't see any examples of that here, but you can either consolidate all of your array-reading functions in one [uproot.TTree.arrays](https://uproot.readthedocs.io/en/latest/uproot.behaviors.TTree.TTree.html#arrays) call or use the `array_cache` argument in both [uproot.TTree.arrays](https://uproot.readthedocs.io/en/latest/uproot.behaviors.TTree.TTree.html#arrays) and [uproot.TBranch.array](https://uproot.readthedocs.io/en/latest/uproot.behaviors.TBranch.TBranch.html#array). (It doesn't do anything magical; it just checks a MutableMapping (dict) that you maintain, first, instead of reading from the file.)\r\n\r\nIf your data are heavily compressed with LZMA, there might be some benefit from setting a `decompression_executor` (give it a [concurrent.futures.ThreadPoolExecutor](https://docs.python.org/3/library/concurrent.futures.html#threadpoolexecutor)). I'm including the caveats (and not recommending `interpretation_executor`) because Python's GIL prevents it from taking advantage of multiple threads in the same process. Decompression, however, is offloaded to external libraries that release the GIL, so we have seen some improvements from multithreading just that part.\r\n\r\nIf you gather all of the array-fetching into one call, it would be easier to convert this into a process that calls [uproot.TTree.iterate](https://uproot.readthedocs.io/en/latest/uproot.behaviors.TTree.TTree.html#iterate) to read a subset of entries in each iteration step. That would allow you to scale to files that are too big to load into memory all at once (while still being a single-threaded process). The amount of data read in each step is controlled by `step_size`, which should be as large as you can make it while not running out of memory. The iteration steps don't need to line up with the TBaskets (granularity in the ROOT file itself), and any mismatches from one step of iteration are carried over to the next step of iteration (so it's a little better than using `entry_start` and `entry_stop` to cut up the file manually).\r\n\r\nTo convert `process` into a task that deals with a subset of entries at a time, you'll either need to collect and add your histograms (with predefined binning, as you have them) or define empty histograms outside of the [uproot.TTree.iterate](https://uproot.readthedocs.io/en/latest/uproot.behaviors.TTree.TTree.html#iterate) or [uproot.iterate](https://uproot.readthedocs.io/en/latest/uproot.behaviors.TBranch.iterate.html) loop and `fill` them repeatedly. hist's `fill` function can be used for multiple array batches.\r\n\r\nBeyond that, you want to consider parallel-processing. Because of Python's GIL, that almost always means [multiprocessing](https://docs.python.org/3/library/multiprocessing.html), which, in turn, means not sending too much data between the processes because it has to be serialized (can't be just referenced as threads can). Your histograms are probably small enough. Setting this manually is annoying, so consider [uproot.dask](https://uproot.readthedocs.io/en/latest/uproot._dask.dask.html) to distribute them on a [Dask](https://www.dask.org/) cluster. ([dask-histogram](https://github.com/dask-contrib/dask-histogram) is a Daskified version of boost-histogram/hist.)\r\n\r\n(How you set up or access the Dask cluster depends on where you are. In [tutorials like this one](https://github.com/jpivarski-talks/2023-07-24-tac-hep-tutorial/blob/main/horizontal.ipynb), we launched a few Dask workers on one computer to show the principle. The [Coffea](https://github.com/CoffeaTeam/coffea) team has extensive experience with Dask, and you might want to consider using Coffea to get some features built-in.\r\n\r\n------------------------\r\n\r\nThe issues involved in horizontal scaling applies to C++ and Python equally, and Python may have an advantage there because of its simplicity\u2014much of the difficulty of horizontal scaling comes from complexity, and simplicity in the workload and interfaces lets you concentrate on the problems in horizontal scaling.\r\n\r\nFor vertical scaling, however, Python can only approach the speed of C++ in specific contexts, when it \"gets out of the way.\" Uproot takes advantage of a fact that is true of some but not all ROOT datasets: pure numerical and ragged-numerical (only one level deep) data are stored in the ROOT file as arrays, so we can just cast those arrays instead of iterating over them. (The equivalent in C++ ROOT is called [Bulk I/O](https://arxiv.org/abs/1906.08169).) Uproot can only approach ROOT's read speed to the extent that this is true: if the individual TBaskets are large (10's or 100's of kB at least) and the data types are right. In that case, reading is dominated by the physical disk speed and decompression, which are the same for Python and C++. In the worst case, you have lots of small files or lots of small TBaskets in them and Python/Uproot will spend most of its time deserializing this metadata. (This worst case is bad for C++, too, but it's proportionally worse for Python.)\r\n\r\nIf you want to go even further afield, you could consider [UnROOT.jl](https://github.com/JuliaHEP/UnROOT.jl) to load the data in Julia. Right now, that means also doing the analysis in Julia, but we're working on ways ([AwkwardArray.jl](https://github.com/JuliaHEP/AwkwardArray.jl)) to connect the two environments.",
+     "createdAt":"2024-01-26T22:01:36Z",
+     "number":8261989,
+     "replies":{
+      "nodes":[],
+      "totalCount":0
+     }
+    },
+    {
+     "author":{
+      "login":"JacekHoleczek"
+     },
+     "body":"What about the \"title\" of the created hist.Hist?\r\nCan one somehow set it or later set the \"title\" of the generated TH1D histogram (when writing the hist.Hist to a ROOT file)?",
+     "createdAt":"2024-01-27T10:32:47Z",
+     "number":8264498,
+     "replies":{
+      "nodes":[
+       {
+        "author":{
+         "login":"jpivarski"
+        },
+        "body":"The `title` is a property of the histogram object, and in Uproot, the `name` is set when you assign it into a ROOT file, like\r\n\r\n```python\r\noutput_file[name] = hist.Hist(... title ...)\r\n```\r\n\r\nIn ROOT, both `fTitle` and `fName` are attributes of the object, but then it has to ensure that the `fName` in the object agrees with the look-up name in the TDirectory, and the look-up names have to be unique apart from cycle number\u2014that's why I went with the policy of Uproot assigning a name at exactly the time when it's put into a directory.\r\n\r\n--------------------\r\n\r\nI had thought that one of the hist metadata attributes is interpreted as a title...\r\n\r\nhttps://github.com/scikit-hep/uproot5/blob/eaa3032ea271f1d468f6af08ac2f14e8cd2e0fcb/src/uproot/writing/identify.py#L259-L261\r\n\r\nBut it looks like Uproot takes the output histogram title from any `title` or `name` attribute on the histogram object itself. But the good news is that you can assign any attribute to a hist object:\r\n\r\n```python\r\n>>> h = hist.Hist.new.Reg(10, -5, 5).Double()\r\n>>> h.title = \"meow\"\r\n>>> h.title\r\n'meow'\r\n```\r\n\r\n(It's not a dataclass or restricted with `__slots__` in such a way that would prevent you from doing that.)\r\n\r\nJust be careful to set the title of the specific histogram that's getting written. If you're filling histograms in parallel, you'll have many identical-apart-from-bin-contents histograms, an arbitrarily assigned attribute like `title` wouldn't be copied when they get merged together.",
+        "createdAt":"2024-01-29T19:09:07Z",
+        "number":8288974
+       },
+       {
+        "author":{
+         "login":"JacekHoleczek"
+        },
+        "body":"Well, I am getting an error (`'Hist' object has no attribute 'title'`) from:\r\n`h = hist.Hist(hist.axis.Regular(10, -5.0, 5.0)); h.title(\"meow\")`\r\n\r\nI am asking about the \"title\", because in ROOT one can use (up to 3 axes): `h->SetTitle(\"Histo title;X title;Y title;Z title\");`\r\nWith \"hist.Hist\", when I create a \"hist.axis.Regular\", I can use: \"`label='X title'`\"\r\nI have no way to set the \"`Y title`\" (because I do not create the second axis).\r\n\r\nBTW. In ROOT, your histogram can have one name in RAM, and then another name can be set when writing it to a file (but the name in RAM will not be changed), e.g.: `h->SetName(\"SomeName\"); h->Write(\"AnotherName\");`",
+        "createdAt":"2024-01-29T19:31:07Z",
+        "number":8289295
+       },
+       {
+        "author":{
+         "login":"jpivarski"
+        },
+        "body":"> Well, I am getting an error (`'Hist' object has no attribute 'title'`) from:\r\n> `h = hist.Hist(hist.axis.Regular(10, -5.0, 5.0)); h.title(\"meow\")`\r\n\r\nIt's\r\n\r\n```python\r\nh.title = \"meow\"\r\n```\r\n\r\nnot\r\n\r\n```python\r\nh.title(\"meow\")\r\n```\r\n\r\n-----------------\r\n\r\nI didn't know about the semicolon-parsing in `h->SetTitle(\"title;x;y;z\")`. It must be an active mechanism to pass titles down to each TAxis. Checking the Uproot code again, it looks like there's a way to get that from hist into ROOT:\r\n\r\nhttps://github.com/scikit-hep/uproot5/blob/eaa3032ea271f1d468f6af08ac2f14e8cd2e0fcb/src/uproot/writing/identify.py#L331-L342\r\n\r\nIt's an `axis` attribute named `label` or `name`. Note that that's on the histogram's `axis`, not on the histogram itself (the distinction that ROOT's semicolon-notation is making).\r\n\r\n```python\r\n>>> h = hist.Hist(hist.axis.Regular(10, -5.0, 5.0, label=\"meow\"))\r\n>>> h.axes[0].label\r\n'meow'\r\n```\r\n\r\nbut\r\n\r\n```python\r\n>>> h.label is None\r\nTrue\r\n```\r\n\r\nEach of hist's axis type constructors has a `label` and a `name` constructor argument ([documented here](https://hist.readthedocs.io/en/latest/user-guide/axes.html)). I don't think there's a preferred convention for whether you should use \"label\" or \"name\".\r\n\r\n----------\r\n\r\n> BTW. In ROOT, your histogram can have one name in RAM, and then another name can be set when writing it to a file (but the name in RAM will not be changed), e.g.: `h->SetName(\"SomeName\"); h->Write(\"AnotherName\");`\r\n\r\nThanks, that's good to know! I was just saying why we decided to not even have names on the objects in Uproot, so that there would only be one source of truth.",
+        "createdAt":"2024-01-29T20:54:23Z",
+        "number":8290710
+       },
+       {
+        "author":{
+         "login":"JacekHoleczek"
+        },
+        "body":"Many thanks ... I did this mistake also in my \"test script\" ... yes, it needs to be `h.title = \"meow\"`\r\n\r\nI tried:\r\n`h_trigger.title = 'Histo title;X title;Y title'`\r\nand then the histogram's title is the whole string (ROOT would strip everything starting from the first \"`;`\" character) and the axes titles are not changed.\r\nNot a problem for me.\r\nSo, I now know how to set \"Histo title\"  and the \"X title\" (using the \"`label ='X title'`\" argument).\r\nWhat I still miss is how to set the \"Y title\" (for a 1D histogram, I explicitly create the X axis only).",
+        "createdAt":"2024-01-29T21:30:26Z",
+        "number":8291245
+       },
+       {
+        "author":{
+         "login":"jpivarski"
+        },
+        "body":"These things are accessible if you're willing to convert from hist to TH* manually. The code in [uproot/writing/identify.py](https://github.com/scikit-hep/uproot5/blob/main/src/uproot/writing/identify.py) recognizes hist objects and builds the corresponding TH* using [to_TAxis](https://uproot.readthedocs.io/en/latest/uproot.writing.identify.to_TAxis.html), [to_TH1x](https://uproot.readthedocs.io/en/latest/uproot.writing.identify.to_TH1x.html), etc. functions. If you do the same, to make an Uproot TH* instance, Uproot will recognize it when you assign it into a file with\r\n\r\n```python\r\noutput_file[name] = some_thistogram_object\r\n```\r\n\r\nand not modify the titles that you assign to it.",
+        "createdAt":"2024-01-29T21:52:29Z",
+        "number":8291732
+       },
+       {
+        "author":{
+         "login":"JacekHoleczek"
+        },
+        "body":"O.K. That would be too complicated for a simple \"demonstrate\" script.\r\n\r\nI've got a strange question ... with Uproot 5.0.13, my small script needed 0.7s. Now, with Uproot 5.2.2 it needs 1.0s (same Python 3.11.7 in a conda-forge \"scikit-hep\" environment in both cases). A compiled C++ application needs 0.6s.\r\n\r\nUPDATE (2024.01.30): I created a test TTree with 100 times more entries (900MB ROOT file), and then Uproot 5.0.13 needed 9.1s while Uproot 5.2.2 needed 10.1s. A compiled C++ application needed 8.6s. Not bad, don't you think?",
+        "createdAt":"2024-01-29T22:03:51Z",
+        "number":8291841
+       },
+       {
+        "author":{
+         "login":"jpivarski"
+        },
+        "body":"Between 5.1.x and 5.2.x, the low-level backend changed from memory-mapping to fsspec. A rate, particularly for such a short time-interval test, could change at the 30% level with differences like that. (Although it's worse in this case, the same change might be better for other cases, the only way to make robust conclusions is to test changes in isolation and focus on large-limit scaling, and those tests were performed before committing to fsspec.)",
+        "createdAt":"2024-01-29T22:15:00Z",
+        "number":8292063
+       },
+       {
+        "author":{
+         "login":"JacekHoleczek"
+        },
+        "body":"Would it make sense to raise the \"(n+1)-axis\" title problem on the \"hist\" (or \"UHI\") forum?\r\nWhen one creates an \"n-dimensional\" histogram, one can easily set the titles of all \"n-axes\" (which are explicitly created). But it seems there is no way to set the title of the \"(n+1)-axis\", which is then shown when drawing the histogram.\r\nMaybe they could add an additional attribute (?), like for the additional global histogram \"title\".",
+        "createdAt":"2024-01-30T08:32:40Z",
+        "number":8300030
+       },
+       {
+        "author":{
+         "login":"jpivarski"
+        },
+        "body":"It's definitely a hist thing, not an Uproot thing, so that's where it should be discussed.\r\n\r\nIs this the \"number of counts\" or \"sum of weights per bin\" axis? That's not an ordinary histogram axis, and ROOT doesn't have a TAxis corresponding to that axis, either. I can see why you want to have a place to put a label like \"counts in 1/GeV\", but I don't know where it would go.",
+        "createdAt":"2024-01-30T13:20:51Z",
+        "number":8305275
+       },
+       {
+        "author":{
+         "login":"JacekHoleczek"
+        },
+        "body":"Actually, ROOT keeps the information about all 3 axes (even if some are not needed/used):\r\n```cpp\r\nTH1F *h = new TH1F(\"h\", \"MyH;MyX;MyY;MyZ\", 1, 0., 1.);\r\nstd::cout << h->GetName() << \" \" << h->GetXaxis()->GetName() << \" \" << h->GetYaxis()->GetName() << \" \" << h->GetZaxis()->GetName() << std::endl;\r\nstd::cout << h->GetTitle() << \" \" << h->GetXaxis()->GetTitle() << \" \" << h->GetYaxis()->GetTitle() << \" \" << h->GetZaxis()->GetTitle() << std::endl;\r\n```\r\n\r\nWhere it could go? Well, we have now the \"title\" attribute (which sets the global histogram title), so I could imagine an additional \"label\" attribute which would then set the \"(n+1)-axis\" title.",
+        "createdAt":"2024-01-30T13:44:40Z",
+        "number":8305540
+       },
+       {
+        "author":{
+         "login":"jpivarski"
+        },
+        "body":"Those three are binning axes, they specify how many bins and what range, which are not relevant for counts/sums of bin weights. In a 3D histogram, where would the \"counts/GeV\" label go?\r\n\r\nI agree that we (or the hist/UHI developers) can make a new attribute to label this counts-dimension (not axis, or anyway, not a binning-axis). Maybe it has already been done and I don't know what its name is. When I plot things with UHI, the plot has the word \"counts\" on that plot axis, and maybe that's a default if it doesn't find something in one of the histogram's own attributes.",
+        "createdAt":"2024-01-30T14:02:37Z",
+        "number":8305949
+       },
+       {
+        "author":{
+         "login":"JacekHoleczek"
+        },
+        "body":"In principle, for me, the \"(n+1)-axis\" title describes the \"physical meaning\" of the \"content\" of bins (e.g., \"number of events\" or \"counts/GeV\").\r\nThe drawing library then can decide what happens to the \"(n+1)-axis\" title.\r\nSome drawing tools may use it, some may not.\r\nFor a `TH1`, this would be the drawn title of the drawn y-axis.\r\nFor a `TH2`, if you use the \"`Z`\" drawing option, an additional \"color palette\" is drawn, and it will get its title from the histogram's \"3rd axis\" title (if the user sets it, of course). Without the \"`Z`\" drawing option, it will simply be the drawn title of the drawn z-axis.\r\nThe problem with a `TH3` is that ROOT keeps 3 axes only, so when drawing, you would need to manually set the title of the \"color palette\" (if you wanted it). I don't think a `TH3` can keep the \"4th axis\" title (at least, I can't remember how to do it).",
+        "createdAt":"2024-01-30T14:31:52Z",
+        "number":8306552
+       },
+       {
+        "author":{
+         "login":"JacekHoleczek"
+        },
+        "body":"Extremely hot (watch out for your fingertips when you click it): \"[`[Z (bad) label for palette axis in TH3D`](https://root-forum.cern.ch/t/z-bad-label-for-palette-axis-in-th3d/53317/18)\"",
+        "createdAt":"2024-01-31T12:46:48Z",
+        "number":8319755
+       }
+      ],
+      "totalCount":13
+     }
+    },
+    {
+     "author":{
+      "login":"JacekHoleczek"
+     },
+     "body":"Many, many thanks for your help and all the additional info (I'll remember what you wrote about the scaling to the \"iterative\" / \"parallel-processing\" approach).\r\n\r\nHere's my final version for the time being:\r\n\r\n```python\r\nimport uproot\r\nimport numpy as np\r\nimport hist\r\n\r\ndef process():\r\n        # open the ROOT file and load the hk TTree\r\n        with uproot.open({'data/my_tree.root': 'hk'}) as t:\r\n                # test that we can read some available branches\r\n                # note: if branches keep C++ fundamental data types or their fixed-size arrays,\r\n                #       one can use the library='np' option (the NumPy, which may improve speed)\r\n                tq_real = t.arrays(['TQReal.nhits', 'TQReal.pc2pe', 'TQReal.t0'], library='np')\r\n                # note: if any branches with ragged/variable-length arrays are retrieved,\r\n                #       one must use the default library='ak' option (the Awkward Array)\r\n                tq_real_hits = t.arrays(['TQReal.hits.cable', 'TQReal.hits.T', 'TQReal.hits.Q'])\r\n                n_high_hit = np.sum(tq_real_hits['TQReal.hits.Q'] > 1.0)\r\n                print(f'Number of high Q hits: {n_high_hit}')\r\n                # create and fill some histograms\r\n                h_goodness = hist.Hist(hist.axis.Regular(100, 0.0, 1.0, label='goodness_time_fit (RecoBonsai)'))\r\n                h_goodness.title = 'bs goodness distribution'\r\n                h_goodness.fill(t['RecoBonsai.goodness_time_fit'].array(library='np'))\r\n                h_trigger = hist.Hist(hist.axis.Regular(10, 0.0, 10.0, label='trigger_id (Header)'))\r\n                h_trigger.title = 'trigger distribution'\r\n                h_trigger.fill(t['Header.trigger_id'].array(library='np'))\r\n                h_goodness_leaf = None\r\n                if 'RecoLEAF.goodness' in t: # RecoLEAF is a new class, not available everywhere\r\n                        h_goodness_leaf = hist.Hist(hist.axis.Regular(100, 0.0, 1.0, label='goodness (RecoLEAF)'))\r\n                        h_goodness_leaf.title = 'leaf goodness distribution'\r\n                        h_goodness_leaf.fill(t['RecoLEAF.goodness'].array(library='np'))\r\n                # write histograms to a ROOT file\r\n                # note: when a new ROOT TH[123]D is created from the\r\n                #       corresponding hist.Hist below, its \"statistics\"\r\n                #       is computed from its bin content (in bare ROOT,\r\n                #       the \"statistics\" is computed at filling time)\r\n                with uproot.recreate('data/output_analysis_tree_python_v1.root') as f_out:\r\n                        f_out['goodness'] = h_goodness\r\n                        f_out['trigger'] = h_trigger\r\n                        if h_goodness_leaf is not None:\r\n                                f_out['goodness_leaf'] = h_goodness_leaf\r\n\r\nif __name__ == '__main__':\r\n        print('Processing')\r\n        process()\r\n        print('Done')\r\n```",
+     "createdAt":"2024-01-29T22:32:20Z",
+     "number":8292265,
+     "replies":{
+      "nodes":[],
+      "totalCount":0
+     }
+    }
+   ],
+   "totalCount":3
+  },
+  "createdAt":"2024-01-26T20:45:44Z",
+  "number":1106,
+  "title":"TTree performance improvements advice needed",
+  "url":"https://github.com/scikit-hep/uproot5/discussions/1106"
+ },
+ {
+  "author":{
+   "login":"jpivarski"
+  },
+  "body":"## New features\r\n\r\n* feat: add the ability to read RNTuple alias columns by @ioanaif in https://github.com/scikit-hep/uproot5/pull/1004\r\n* feat: support for writing hist derived profiles by @ioanaif in https://github.com/scikit-hep/uproot5/pull/1000\r\n* feat: add dask_to_root by @zbilodea in https://github.com/scikit-hep/uproot5/pull/1085\r\n* feat: allow user to supply tuple of allowed exceptions by @douglasdavis in https://github.com/scikit-hep/uproot5/pull/1094\r\n\r\n## Bug-fixes and performance\r\n\r\n* fix: pandas performance on files with many branches by @ioanaif in https://github.com/scikit-hep/uproot5/pull/1086\r\n* fix: state of context[\"forth\"] after an entire TBasket is incomplete by @jpivarski in https://github.com/scikit-hep/uproot5/pull/1100\r\n* fix: any Locks in Models must be transient by @jpivarski in https://github.com/scikit-hep/uproot5/pull/1103\r\n* fix: better path handling in uproot.dask_write by @lgray in https://github.com/scikit-hep/uproot5/pull/1104\r\n* fix: recorrds -> records by @jpivarski in https://github.com/scikit-hep/uproot5/pull/1088\r\n\r\n## Other\r\n\r\n* build: change build to autogen version info by @lgray in https://github.com/scikit-hep/uproot5/pull/1062\r\n* docs: fix ReadTheDocs documentation by @jpivarski in https://github.com/scikit-hep/uproot5/pull/1084\r\n* docs: add bnavigator as a contributor for test by @allcontributors in https://github.com/scikit-hep/uproot5/pull/1087\r\n* chore(deps): bump actions/download-artifact from 3 to 4 by @dependabot in https://github.com/scikit-hep/uproot5/pull/1072\r\n* chore(deps): bump actions/upload-artifact from 3 to 4 by @dependabot in https://github.com/scikit-hep/uproot5/pull/1071\r\n* chore: update pre-commit hooks by @pre-commit-ci in https://github.com/scikit-hep/uproot5/pull/1073\r\n* chore: update pre-commit hooks by @pre-commit-ci in https://github.com/scikit-hep/uproot5/pull/1082\r\n* chore: update pre-commit hooks by @pre-commit-ci in https://github.com/scikit-hep/uproot5/pull/1092\r\n* chore: add dask_write to read-the-docs by @zbilodea in https://github.com/scikit-hep/uproot5/pull/1105\r\n\r\n## New Contributors\r\n* @zbilodea made their first contribution in https://github.com/scikit-hep/uproot5/pull/1085\r\n\r\n**Full Changelog**: https://github.com/scikit-hep/uproot5/compare/v5.2.1...v5.2.2\n\n<hr /><em>This discussion was created from the release <a href='https://github.com/scikit-hep/uproot5/releases/tag/v5.2.2'>Version 5.2.2</a>.</em>",
+  "comments":{
+   "nodes":[],
+   "totalCount":0
+  },
+  "createdAt":"2024-01-26T21:00:39Z",
+  "number":1107,
+  "title":"Version 5.2.2",
+  "url":"https://github.com/scikit-hep/uproot5/discussions/1107"
+ },
+ {
+  "author":{
+   "login":"JacekHoleczek"
+  },
+  "body":"I am trying to write a small python macro that should \"demonstrate\" that uproot is (almost) as fast as C++.\r\n\r\nFor test purposes, I have got a `ROOT::Experimental::RNTuple` created by ROOT 6.28/10 (its structure \"mimics\" the `TTree` from my other [`#1106`](https://github.com/scikit-hep/uproot5/discussions/1106) thread).\r\n\r\nIt seems I can't get it running.\r\n(Well, until now, I have never played with any RNTuple.)\r\n\r\nFirst, I created a conda-forge \"scikit-hep\" environment. It comes with Python 3.11.7 and an old Uproot 5.0.13 (can one ask someone to upgrade Uproot to the latest version in \"Scikit-HEP\"?).\r\n\r\nThen, I created a conda-forge \"uproot\" environment. It comes with Python 3.12.1 and the newest Uproot 5.2.2 (but the \"hist\" cannot be added).\r\n\r\nIn both environments, I can:\r\n`t = uproot.open({'data/my_ntuple.root': 'hk'})`\r\n\r\nThe \"`TQReal`\" is just a simple class with several members that keep C++ fundamental data types.\r\n\r\nIn both environments, when I try:\r\n`t['TQReal']`\r\nI get:\r\n`TypeError: 'Model_ROOT_3a3a_Experimental_3a3a_RNTuple' object is not subscriptable`\r\n\r\nThen, when I try:\r\n`tq_real = t.arrays(['TQReal.nhits', 'TQReal.pc2pe', 'TQReal.t0'])`\r\nUproot 5.0.13 is able to retrieve them, but Uproot 5.2.2 terribly breaks.\r\n\r\nAlso, if I add \"`library='np'`\" in the above line, both Uproot versions break.\r\n\r\nWhat now?\r\n\r\nBTW. You might be interested in this recent [`ROOT Forum`](https://root-forum.cern.ch/) thread: [`RNTuple: Where are we now and what\u2019s next?`](https://root-forum.cern.ch/t/rntuple-where-are-we-now-and-what-s-next/57980)\r\n",
+  "comments":{
+   "nodes":[
+    {
+     "author":{
+      "login":"eduardo-rodrigues"
+     },
+     "body":"Hello @JacekHoleczek, I happen to try and follow this hence catched your comment\r\n\r\n> First, I created a conda-forge \"scikit-hep\" environment. It comes with Python 3.11.7 and an old Uproot 5.0.13 (can one ask someone to upgrade Uproot to the latest version in \"Scikit-HEP\"?).\r\n\r\nThank you for the interest. A new release is indeed due since a while and it's been on my to-do list. But then (core) work kicks in ...\r\n\r\nI will do it today.\r\n\r\nNote that we are always keen on getting contributions and contributors, across the org, hence you are more than welcome to create PR :-).",
+     "createdAt":"2024-01-29T09:10:45Z",
+     "number":8279277,
+     "replies":{
+      "nodes":[
+       {
+        "author":{
+         "login":"eduardo-rodrigues"
+        },
+        "body":"See https://github.com/scikit-hep/scikit-hep/pull/347.",
+        "createdAt":"2024-01-29T09:17:39Z",
+        "number":8279361
+       },
+       {
+        "author":{
+         "login":"JacekHoleczek"
+        },
+        "body":"Maybe one should also upgrade the \"awkward\" and \"dask-awkward\".",
+        "createdAt":"2024-01-29T09:33:28Z",
+        "number":8279570
+       },
+       {
+        "author":{
+         "login":"eduardo-rodrigues"
+        },
+        "body":"I don't understand - as far as the current metapackage is concerned, meaning the packages it bundles, a pip install will now pick up all latest minor versions.",
+        "createdAt":"2024-01-29T09:35:47Z",
+        "number":8279594
+       },
+       {
+        "author":{
+         "login":"JacekHoleczek"
+        },
+        "body":"Currently, in the \"scikit-hep\" environment I have \"awkward 2.4.10\" and \"dask-awkward 2023.11.2\", while in \"uproot\" environment I have \"awkward 2.5.2\" and \"dask-awkward 2024.1.2\".\r\nMaybe when the Uproot gets upgraded also the \"awkward\" and \"dask-awkward\" will be automatically upgraded (I'll verify it once your merge request is processed and I get the new Uproot in \"scikit-hep\" from the conda-forge ).",
+        "createdAt":"2024-01-29T09:41:33Z",
+        "number":8279649
+       },
+       {
+        "author":{
+         "login":"eduardo-rodrigues"
+        },
+        "body":"See https://github.com/scikit-hep/scikit-hep/releases/tag/2024.1.1 - you will now be picking up awkward 2.5.x and all that goes with it :-).",
+        "createdAt":"2024-01-29T09:44:38Z",
+        "number":8279695
+       },
+       {
+        "author":{
+         "login":"JacekHoleczek"
+        },
+        "body":"Thanks. All these packages got upgraded in conda-forge.",
+        "createdAt":"2024-01-29T20:05:25Z",
+        "number":8289907
+       }
+      ],
+      "totalCount":6
+     }
+    },
+    {
+     "author":{
+      "login":"jpivarski"
+     },
+     "body":"Just for caution: the RNTuple format was recently updated and Uproot was updated to account for it (#962, #1004). Since the format is in active development, we're not making any attempt to be backward compatible for old RNTuple formats\u2014not until RNTuple declares \"1.0\", anyway. Be sure to align your ROOT version with Uproot version.\r\n\r\nCc: @ariostas",
+     "createdAt":"2024-01-29T19:15:20Z",
+     "number":8289048,
+     "replies":{
+      "nodes":[
+       {
+        "author":{
+         "login":"JacekHoleczek"
+        },
+        "body":"O.K. But how can I learn which ROOT versions some specific Uproot version supports? For example, I have here ROOT 6.26/10, 6.26/14, 6.28/06, 6.28/10, and 6.30/02 (on different Linux systems). It is written somewhere in Uproot \"release notes\"?",
+        "createdAt":"2024-01-29T19:56:17Z",
+        "number":8289802
+       },
+       {
+        "author":{
+         "login":"jpivarski"
+        },
+        "body":"Uh... not really. Since this is on the development hot-path, we're just trying to keep the latest Uproot in line with the latest ROOT. We can't make more nuanced guarantees.\r\n\r\n(Outside of RNTuple, the version support for TTrees was tested for all ROOT versions released 5 years before Uproot 1.0, which is 5 years ago now, so it should be an interval of validity of 10 years: see the `uproot-sample-*.root` files [here](https://github.com/scikit-hep/scikit-hep-testdata/tree/main/src/skhep_testdata/data). But that's not what you're interested in: you're interested in RNTuples.)",
+        "createdAt":"2024-01-29T21:00:25Z",
+        "number":8290900
+       },
+       {
+        "author":{
+         "login":"jpivarski"
+        },
+        "body":"Okay, so now there's a new ROOT on the 6.30 line: [6.30.04](https://root.cern/releases/release-63004/).[^1]\r\n\r\n[^1]: I wonder if this means they're going to stop using slashes in version numbers and use only dots instead. That would make it easier to fit into systems that expect version numbers in a particular format, though I would always just convert a slash into a dot, anyway.",
+        "createdAt":"2024-01-31T14:46:13Z",
+        "number":8321409
+       },
+       {
+        "author":{
+         "login":"JacekHoleczek"
+        },
+        "body":"Nothing related to RNTuple is changed in the [6.30.04](https://github.com/root-project/root/commits/v6-30-04) (as compared to the 6.30.02).\r\n\r\nI think I remember an \"official\" statement that (from now on) the \"`/`\" will be replaced with a \"`.`\".",
+        "createdAt":"2024-01-31T16:30:32Z",
+        "number":8322869
+       }
+      ],
+      "totalCount":4
+     }
+    },
+    {
+     "author":{
+      "login":"JacekHoleczek"
+     },
+     "body":"O.K. I \"regenerated\" my RNTuple test file with ROOT 6.30/02.\r\n\r\nNow, Uproot 5.2.2 is able to get: `tq_real = t.arrays(['TQReal.nhits', 'TQReal.pc2pe', 'TQReal.t0'])`\r\n\r\nWell, If I try to add \"`library='np'`\", I get:\r\n`TypeError: Model_ROOT_3a3a_Experimental_3a3a_RNTuple.arrays() got an unexpected keyword argument 'library'`\r\n\r\nI have some problems when using it (`FieldNotFoundError: no field 'TQReal.nhits' in record with 1 fields`):\r\n`tq_real['TQReal.nhits']`\r\n\r\nWhy does the \"`t.arrays`\" call accept \"`'TQReal.nhits'`\" but then it fails?\r\n\r\nThis works, though (so I could use it in my \"proof of concept\" script):\r\n`tq_real['TQReal']['nhits']`\r\n\r\n But I still cannot get individual arrays (`object is not subscriptable`):\r\n`t['TQReal'].array()`\r\n`t['TQReal.nhits'].array()`\r\n\r\nAny replacement?\r\nI've only found a crazy way:\r\n` t.arrays(['A.B.C.D'])['A']['B']['C']['D']`\r\n\r\nActually, it seems I have a much more serious problem:\r\n`tq_real_hits = t.arrays(['TQReal'])`\r\nreturns:\r\n```text\r\nFile ~/micromamba/envs/scikit-hep/lib/python3.11/site-packages/uproot/models/RNTuple.py:507, in Model_ROOT_3a3a_Experimental_3a3a_RNTuple.arrays(self, filter_names, filter_typenames, entry_start, entry_stop, decompression_executor, array_cache)\r\n    500     raise (\r\n    501         RuntimeError(\r\n    502             f\"The key: {key} is missing both from the columns records and the alias columns.\"\r\n    503         )\r\n    504     )\r\n    506 dtype_byte = self._column_records_dict[id][\"rel_crs\"][0].type\r\n--> 507 content = self.read_col_pages(\r\n    508     id, range(start_cluster_idx, stop_cluster_idx)\r\n    509 )\r\n    510 if dtype_byte == uproot.const.rntuple_col_type_to_num_dict[\"switch\"]:\r\n    511     kindex, tags = _split_switch_bits(content)\r\n(...)\r\n```\r\nI suspect the problem is that the `TQReal` keeps ragged `hits` arrays (`std::vector<FormatHit>` which then have `cable`, `T`, and `Q` data members).",
+     "createdAt":"2024-01-29T20:33:22Z",
+     "number":8290502,
+     "replies":{
+      "nodes":[
+       {
+        "author":{
+         "login":"jpivarski"
+        },
+        "body":"> O.K. I \"regenerated\" my RNTuple test file with ROOT 6.30/02.\r\n\r\nI confirm that this is the [latest release of ROOT](https://root.cern/releases/release-63002/).\r\n\r\n> Well, If I try to add \"`library='np'`\", I get:\r\n> `TypeError: Model_ROOT_3a3a_Experimental_3a3a_RNTuple.arrays() got an unexpected keyword argument 'library'`\r\n\r\nThe `Model_ROOT_3a3a_Experimental_3a3a_RNTuple.arrays` function (do we have a better name for it than that? I'm surprised...) is not the `TTree.arrays` function; it doesn't support all of the same arguments. In particular, we only plan to support RNTuple \u2192 Awkward Array, since the RNTuple format is one-to-one with Awkward Arrays. Unlike TTree, there's no advantage to going directly to NumPy arrays; going through Awkward and [ak.to_numpy](https://awkward-array.org/doc/main/reference/generated/ak.to_numpy.html) is just as good.\r\n\r\nAs for the other errors, @ariostas is planning to take a look at the RNTuple code. This might be a good place to start.",
+        "createdAt":"2024-01-29T21:05:02Z",
+        "number":8290951
+       },
+       {
+        "author":{
+         "login":"JacekHoleczek"
+        },
+        "body":"O.K. Many thanks for your help.\r\n\r\nFor the unexpected \"library\" argument. Maybe it would be a good idea to support the same user interface for TTree and RNTuple. Then, one could easily \"reuse\" scripts (of course, some arguments would be \"ignored\" when not needed).",
+        "createdAt":"2024-01-29T21:06:42Z",
+        "number":8290967
+       },
+       {
+        "author":{
+         "login":"jpivarski"
+        },
+        "body":"FYI, there's a new version of ROOT, [v6.28/12](https://root.cern/doc/v628/release-notes.html#release-6.2812), which might have more RNTuple updates.",
+        "createdAt":"2024-01-30T14:56:58Z",
+        "number":8307032
+       },
+       {
+        "author":{
+         "login":"JacekHoleczek"
+        },
+        "body":"I don't think they changed anything related to RNTuple in the [6.28/12](https://github.com/root-project/root/commits/v6-28-12) (as compared to the 6.28/10).\r\n\r\nAll development goes into the \"master\" branch, which will become 6.32 at one point (some changes may appear in any new 6.30 release, though).\r\n\r\nUPDATE (2024.01.31): Nothing related to RNTuple is changed in the [6.30.04](https://github.com/root-project/root/commits/v6-30-04) (as compared to the 6.30.02).",
+        "createdAt":"2024-01-30T15:18:08Z",
+        "number":8307412
+       }
+      ],
+      "totalCount":4
+     }
+    },
+    {
+     "author":{
+      "login":"JacekHoleczek"
+     },
+     "body":"Well, if you want to play with these problems ... I created a tiny RNTuple with just 2 events.\r\nWith ROOT 6.30.02: [my_ntuple.root.zip](https://github.com/scikit-hep/uproot5/files/14095520/my_ntuple.root.zip)\r\nWith ROOT 6.30.04: [my_ntuple.root.zip](https://github.com/scikit-hep/uproot5/files/14114680/my_ntuple.root.zip)",
+     "createdAt":"2024-01-30T09:22:28Z",
+     "number":8301057,
+     "replies":{
+      "nodes":[],
+      "totalCount":0
+     }
+    }
+   ],
+   "totalCount":4
+  },
+  "createdAt":"2024-01-28T20:03:22Z",
+  "number":1109,
+  "title":"RNTuple performance improvements advice needed",
+  "url":"https://github.com/scikit-hep/uproot5/discussions/1109"
+ },
+ {
+  "author":{
+   "login":"Jailbone"
+  },
+  "body":"Since I have not solved my problem (of understanding) till this day I want to come back to a question I posted [here](https://stackoverflow.com/questions/77704003/uproot-and-dask).\r\n\r\nI will try to reformulate it to make my confusion clear.\r\n\r\n```\r\nimport uproot\r\nimport numpy as np\r\n\r\n\r\n# First create a root testfile:\r\nwith uproot.recreate(\"test.root\") as file:\r\n    file[\"test_tree\"] = {\"test_branch\": np.random.random((100,10))}\r\n\r\n# Open and load branch into numpy array\r\ntree = uproot.open(\"./test.root:test_tree\")\r\nbranch = tree[\"test_branch\"].array(library = 'np')\r\n\r\n#Calculate mean row-wise\r\nmean_rows = np.mean(branch, axis = 1)\r\n```\r\n\r\nNo problem till here, standard stuff. Now trying the same thing with the uproot functionality to load the branch into dask arrays:\r\n\r\n```\r\ntree = uproot.dask(\"./test.root:test_tree\", library = 'np')\r\nbranch = tree[\"test_branch\"]\r\nmean_rows = np.mean(branch, axis = 1).compute()\r\n\r\n#out: numpy.AxisError: Axis 1 is out of bounds for array of dimension 1\r\n```\r\n\r\nThis does not work and I do not understand why.\r\n\r\nLet's see what happens when trying to calculate the mean along axis = 0:\r\n\r\n```\r\nmean = np.mean(branch).compute()\r\n\r\n#out: array([0.49147538, 0.49599721, 0.50983183, 0.53635986, 0.52194236,\r\n       0.44889005, 0.53403688, 0.50172642, 0.49488129, 0.50677238])\r\n```\r\n\r\nHm, that is also strange. That is the mean calculated column-wise (10 elements for the 10 columns). Even more confusing. So what am I failing to understand?\r\n",
+  "comments":{
+   "nodes":[],
+   "totalCount":0
+  },
+  "createdAt":"2024-02-03T09:14:10Z",
+  "number":1116,
+  "title":"Dask computation confusion",
+  "url":"https://github.com/scikit-hep/uproot5/discussions/1116"
+ },
+ {
+  "author":{
+   "login":"jpivarski"
+  },
+  "body":"The main new feature (and motivation for a new minor release, 5.3.0), is that Uproot now strictly depends on the [cramjam](https://pypi.org/project/cramjam/) library for compression, rather than optionally depending on lz4, xxhash, and zstd (prompting users to install them when needed, rather than upfront when Uproot is installed).\r\n\r\n## New features\r\n\r\n* feat: use cramjam for lzma, lz4, and zstd, opt-in use of isal for zlib by @lgray in https://github.com/scikit-hep/uproot5/pull/1090\r\n\r\n## Bug-fixes and performance\r\n\r\n* fix: missing '_fh' and '_file' attributes after unpickling by @jpivarski in https://github.com/scikit-hep/uproot5/pull/1118\r\n* fix: fix dask_write docs by @zbilodea in https://github.com/scikit-hep/uproot5/pull/1122\r\n* fix: attempt to concatenate numpy and awkward arrays by @ioanaif in https://github.com/scikit-hep/uproot5/pull/1114\r\n* fix: test suite creates files not in tmp_path by @ioanaif in https://github.com/scikit-hep/uproot5/pull/1123\r\n\r\n## Other\r\n\r\n* chore: update pre-commit hooks by @pre-commit-ci in https://github.com/scikit-hep/uproot5/pull/1110\r\n* chore: update pre-commit hooks by @pre-commit-ci in https://github.com/scikit-hep/uproot5/pull/1119\r\n\r\n\r\n**Full Changelog**: https://github.com/scikit-hep/uproot5/compare/v5.2.2...v5.3.0rc1\n\n<hr /><em>This discussion was created from the release <a href='https://github.com/scikit-hep/uproot5/releases/tag/v5.3.0rc1'>Version 5.3.0rc1</a>.</em>",
+  "comments":{
+   "nodes":[],
+   "totalCount":0
+  },
+  "createdAt":"2024-02-14T19:17:44Z",
+  "number":1126,
+  "title":"Version 5.3.0rc1",
+  "url":"https://github.com/scikit-hep/uproot5/discussions/1126"
+ },
+ {
+  "author":{
+   "login":"bojohnson5"
+  },
+  "body":"I'm using ruff for linting my code and see these errors pop up on various lines. I'm curious to know if others have encountered this and if there's a way to fix it. Thanks!\r\n\r\n![Screenshot 2024-02-16 at 3 56 41\u202fPM](https://github.com/scikit-hep/uproot5/assets/20647190/86d4b5da-e5c8-4274-b10e-57f59994d8df)\r\n",
+  "comments":{
+   "nodes":[],
+   "totalCount":0
+  },
+  "createdAt":"2024-02-16T21:06:03Z",
+  "number":1129,
+  "title":"Linter diagnostics",
+  "url":"https://github.com/scikit-hep/uproot5/discussions/1129"
+ },
+ {
+  "author":{
+   "login":"jmcarcell"
+  },
+  "body":"I want to create a TTree with a certain structure so a class can be read later with ROOT.\r\nFrom the tutorial we can do the following to create a TTree:\r\n```\r\nfile[\"tree1\"] = {\"branch1\": np.arange(1000), \"branch2\": np.arange(1000)*1.1}\r\n```\r\nWhat if I wanted branch1 to belong to one top-level branch and branch2 to belong to a different top-level branch instead of how currently they will be both a top level branch inside `tree1`?",
+  "comments":{
+   "nodes":[
+    {
+     "author":{
+      "login":"jpivarski"
+     },
+     "body":"I didn't add a way to do that because I didn't see what it would be useful for. Nesting TBranch objects doesn't have anything to do with how nested the data are.\r\n\r\nAlso, it would be difficult to implement. Since the WritableTree object needs to be mutable, to `extend` it iteratively over a large dataset, it's implemented as a template with values that can change (like the array of pointers to TBaskets). That template is general enough to include a flat list of TBranches, but not a nested list. (It's the _metadata_ that gets nested, but the metadata was implemented as a template, and it would be hard to generalize the template.)",
+     "createdAt":"2024-02-19T16:54:25Z",
+     "number":8520099,
+     "replies":{
+      "nodes":[],
+      "totalCount":0
+     }
+    }
+   ],
+   "totalCount":1
+  },
+  "createdAt":"2024-02-19T14:52:57Z",
+  "number":1132,
+  "title":"How can I create a TTree with nested branches?",
+  "url":"https://github.com/scikit-hep/uproot5/discussions/1132"
+ }
+]

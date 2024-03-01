@@ -1,0 +1,260 @@
+[
+ {
+  "author":{
+   "login":"NumesSanguis"
+  },
+  "body":"Not sure if here or the [Google doc](https://docs.google.com/document/d/1lj8ARTKV1_hqGTh0W_f01S6SsmpzZAXz9qqqWnEB3j4/edit?usp=sharing) is better (but no support for Markdown), so feel free to move it.\r\n\r\nWhen searching for more user-friendly approaches to arrays, I came across `xarray`, which allows for labelled selection of ND arrays: http://xarray.pydata.org/en/stable/why-xarray.html . While this library extends Pandas with N-dimensional arrays, it is still limited to rectangle arrays.\r\nFrom their documentation:\r\n\r\n> - DataArray is our implementation of a labeled, N-dimensional array. It is an N-D generalization of a pandas.Series. The name DataArray itself is borrowed from Fernando Perez\u2019s datarray project, which prototyped a similar data structure.\r\n> - Dataset is a multi-dimensional, in-memory array database. It is a dict-like container of DataArray objects aligned along any number of shared dimensions, and serves a similar purpose in xarray to the pandas.DataFrame.\r\n\r\n- Why non-named Tensors (deep learning) are harmful: http://nlp.seas.harvard.edu/NamedTensor\r\n- A blog post about xarray in the scientific community: https://medium.com/pangeo/thoughts-on-the-state-of-xarray-within-the-broader-scientific-python-ecosystem-5cee3c59cd2b\r\n\r\nAfter using `awkward-array` for a bit, I feel there are some similarities with `Table`:\r\n```python\r\naw_arr = aw.fromiter([{'foo': np.array([1, 2, 3]), 'bar': ('x', [1, 2]), 'baz': np.pi}])\r\naw_arr.tolist()\r\n# [{'bar': ['x', [1, 2]], 'baz': 3.141592653589793, 'foo': [1, 2, 3]}]\r\n\r\nds = xr.Dataset({'foo': np.array([1, 2, 3]), 'bar': ('x', [1, 2]), 'baz': np.pi})\r\nds\r\n# <xarray.Dataset>\r\n# Dimensions:  (foo: 3, x: 2)\r\n# Coordinates:\r\n#   * foo      (foo) int64 1 2 3\r\n# Dimensions without coordinates: x\r\n# Data variables:\r\n#     bar      (x) int64 1 2\r\n#     baz      float64 3.142\r\n```\r\n\r\nSome possible advantages of xarray:\r\n  1. It is getting popular with 1.5k stars: https://github.com/pydata/xarray\r\n  2. xarray has uptake in the [Geosciences](http://xarray.pydata.org/en/stable/related-projects.html#related-projects)\r\n  3. Closely integrated with Pandas; Instead of returning a DataFrame MultiIndex for multi-dimensional data, you could [return `xarray.Dataset`](http://xarray.pydata.org/en/stable/quick-overview.html#datasets)?\r\n  4. xarray has integration with Dask, which is what awkward also has on the roadmap\r\n  5. Supports [`netCDF`](https://www.unidata.ucar.edu/software/netcdf/), which [are HDF5 files](https://www.unidata.ucar.edu/software/netcdf/) + self-describing data\r\n  6. Discussion of using [PyTorch as backend](https://github.com/pydata/xarray/issues/3232), which would allow GPU computation and therefore help with Awkward's goal of CPU and GPU computation.\r\n\r\nNot sure how exactly this AwkwardArray and xarray would integrate, but I think it would be good to give it some consideration. Maybe it's not even possible, but some elements could be useful?\r\nWhat are your thoughts on it?",
+  "comments":{
+   "nodes":[
+    {
+     "author":{
+      "login":"jpivarski"
+     },
+     "body":"This is a good place to discuss (the Google Doc is getting stale as real development surpasses the planning). And congrats on the first issue!\r\n\r\nAlthough I haven't explicitly used xarray, I know about it and its place in the ecosystem. Whereas Pandas represents two-dimensional, indexed tables (or more dimensions, sparsely, through `MultiIndex`), xarray represents N-dimensional, indexed arrays (or \"tensor,\" as we've been calling N-dimensional arrays these days). Adding index keys of any number of dimensions is incredibly useful for analysis, as it introduces a [whole suite of join-like operations](https://pandas.pydata.org/pandas-docs/stable/user_guide/merging.html) that are known to be useful from the SQL world.\r\n\r\nAwkward array doesn't conflict in scope or purpose with Pandas or xarray\u2014it does something they don't: arbitrary data structures. (In a \"first class\" sense; Pandas can put Python data in cells but can't do vector operations on them the way that Awkward can.) So, as a Venn diagram, Awkward is not a subset of Pandas/xarray.\r\n\r\nBut knowing that indexed keys are so useful, they've been integrated into the plan. In Awkward, the index column is called `awkward::Identity`. It's a much simpler structure than Pandas's indexes (the Venn diagram doesn't fully overlap either way), but it has enough information to ensure that row identity isn't lost in a conversion from Pandas/xarray to Awkward. (That is, it's isomorphic to a Pandas Index; we'll be able to preserve the Index information through an Awkward calculation.)\r\n\r\nSpecifically, an Awkward Identity for one element of an array is a tuple of integers and strings: integers indicate the array position at each level of nesting, and strings represent any table inclusion. When you select an element from an awkward `array` as\r\n\r\n```python\r\narray[12, \"outer_field1\", 56, 0, \"inner_field4\", 99]\r\n```\r\n\r\nthe Identity for that element is `(12, \"outer_field1\", 56, 0, \"inner_field4\", 99)`. If you do any filtering or rearrangement of the array, the path to select the element may be different in the filtered/rearranged array, but the Identity is maintained. In physics, an Identity might look like `(12345, \"muons\", 2, \"associatedJets\", 1)`, and it would have the same value even if you cut events or combine particles to look for decays. Keeping this information lets us join datasets derived from the same source: if you compute a quantity on filtered/manipulated data, you can still match that quantity with the original data or data that have been filtered/manipulated some other way.\r\n\r\nNumPy without indexing has its place, and it is usually faster than Pandas because an index is one more thing to carry through all operations. Therefore, indexes are optional in Awkward. It is one of the few mutable attributes of an Awkward array: with a dataset you'd like to use as your \"starting\" form, you call `array.setid()` to recursively assign Identities based on paths from the top-level `array`.\r\n\r\nIn the planning documents, I mention Pandas a lot, but xarray would also be a good target for integration. I haven't looked into how integration with xarray works or what it requires. (Pandas requires a lot: my arrays need to be subclasses of a Pandas extension class.) Since we can now preserve index keys and pass them through an Awkward calculation, we should have an easier time converting to and from Pandas and xarray.",
+     "createdAt":"2019-12-03T12:43:28Z",
+     "number":166646,
+     "replies":{
+      "nodes":[],
+      "totalCount":0
+     }
+    },
+    {
+     "author":{
+      "login":"NumesSanguis"
+     },
+     "body":"Thanks for the detailed breakdown. I learned something today :)\r\n\r\n> (the Google Doc is getting stale as real development surpasses the planning)\r\n\r\nAny place where the real progress is documented? You might consider using the kanban of Github: https://github.com/scikit-hep/awkward-1.0/projects\r\n\r\nIt sounds promising how it goes. If Pandas is (almost) fully supported, I assume xarray shouldn't be much of a technical challenge. [xarray has the functions](http://xarray.pydata.org/en/stable/pandas.html#dataset-and-dataframe): `xr.Dataset.to_dataframe()` and `xr.Dataset.from_dataframe()`, and [Pandas the function](https://pandas.pydata.org/pandas-docs/stable/reference/api/pandas.DataFrame.to_xarray.html): `pandas.DataFrame.to_xarray()`.\r\n\r\nYou might want to rename the functions `awkward.topandas()` and `awkward.frompandas()` to `awkward.to_pandas()` and `awkward.from_pandas()` to match the naming convention in related libraries (https://github.com/scikit-hep/awkward-array/issues/215).\r\n\r\nYou can keep this issue open as a reminder or other people want to pitch in their ideas, but I don't mind if you close it either.",
+     "createdAt":"2019-12-04T01:18:37Z",
+     "number":166647,
+     "replies":{
+      "nodes":[],
+      "totalCount":0
+     }
+    },
+    {
+     "author":{
+      "login":"jpivarski"
+     },
+     "body":"This is a good place for up-to-date discussions. Implementation is happening as fast as possible to get to a minimum viable product, and documenting during that progress would hamper it. So just ask here and I'll try to answer your questions.\r\n\r\nI started developing the high-level `awkward.Array` today and it might not need any `from_*` functions at all. The `awkward.Array` constructor can take all types and transform them appropriately. I'm actually writing the `from_*` functions in a submodule, which the constructor uses in its implementation, but the user interface can be just that constructor. That way, users don't have to go looking for the appropriate function, at least when ingesting into Awkward. (The other way is another issue.)",
+     "createdAt":"2019-12-04T04:24:47Z",
+     "number":166648,
+     "replies":{
+      "nodes":[],
+      "totalCount":0
+     }
+    },
+    {
+     "author":{
+      "login":"jpivarski"
+     },
+     "body":"I think I can close this now. Cheers!",
+     "createdAt":"2020-01-04T20:15:55Z",
+     "number":166649,
+     "replies":{
+      "nodes":[],
+      "totalCount":0
+     }
+    },
+    {
+     "author":{
+      "login":"benbovy"
+     },
+     "body":"@jpivarski, I just found this issue after watching your very nice [presentation](https://www.youtube.com/watch?v=WlnUF3LRBj4) for SciPy 2020. Here are some thoughts (note: I'm a xarray contributor):\r\n\r\nXarray supports `__array_function__` ([NEP18](https://numpy.org/neps/nep-0018-array-function-protocol.html)), and recently there as been (still ongoing) efforts to integrate xarray with [sparse](https://sparse.pydata.org/en/stable/), [cupy](https://github.com/cupy/cupy) and [pint](https://pint.readthedocs.io/en/stable/). As far as I understand, Awkward also supports NEP18 so it shouldn't be too hard to wrap Awkard arrays as variables or coordinates in xarray Datasets or DataArrays. One benefit of this might be in case we have more structured labels but still variable-sized data: we could create a data variable wrapping an Awkward array (where, e.g., each element of the array represent vertices of a geometrical object) and then create one or more coordinates to store some labels for those objects. This way we could reuse those labels for other data variables as well, and also reuse all libraries (visualization, etc.) that already leverage xarray labelling features. Integration between xarray and numpy-like array libraries will be made easier in the future (it is part of [xarray's development roadmap](http://xarray.pydata.org/en/stable/roadmap.html#flexible-arrays)).\r\n\r\nAnother item of xarray's development roadmap is adding [support for flexible indexes](http://xarray.pydata.org/en/stable/roadmap.html#flexible-indexes). While I don't have any specific use case in mind, I could imagine how useful would be to use Awkward arrays as xarray coordinates and wrap the `awkward::Identity` logic into a xarray-compatible index, e.g., for indexing along dimensions where labels have complex, arbitrary structures.\r\n\r\nI may be missing other cases where integration between Awkward and xarray would be useful.\r\n\r\n ",
+     "createdAt":"2020-07-29T08:43:22Z",
+     "number":166650,
+     "replies":{
+      "nodes":[],
+      "totalCount":0
+     }
+    },
+    {
+     "author":{
+      "login":"benbovy"
+     },
+     "body":"> NumPy without indexing has its place, and it is usually faster than Pandas because an index is one more thing to carry through all operations. Therefore, indexes are optional in Awkward.\r\n\r\nNote: indexes are also optional in xarray.",
+     "createdAt":"2020-07-29T08:49:56Z",
+     "number":166651,
+     "replies":{
+      "nodes":[],
+      "totalCount":0
+     }
+    },
+    {
+     "author":{
+      "login":"jpivarski"
+     },
+     "body":"That would be super-cool, if Awkward Arrays could just be passed into xarray to gain labeled axes: it would be good separation of concerns on our side (we don't have to invent labeled axes) and on xarray's side (you get ragged arrays and other data structures for free).\r\n\r\nI think I don't know enough about xarray\u2014in my mind, it's \"n-dimensional Pandas.\" We managed to pass Awkward Arrays into Pandas Series and DataFrames, but this introduces sticky inheritance problems (we get a lot of methods we don't want and have to preemptively import Pandas) and doesn't seem to provide much benefit because Pandas's functions see the Awkward data structures as black boxes. In toy analyses invented to demonstrate this feature, we find ourselves taking the arrays out of Pandas again to actually use them. Issue #350 is a call for use-cases before deciding where to remove this feature.\r\n\r\nIt would already help if the way xarray accesses arrays is protocol-based so that we don't have to inherit from it (the import problem) and our structure-aware functions would still be usable (the black box problem). If this works smoothly for xarray in a way that it didn't for Pandas, that's more than just being \"n-dimensional Pandas,\" it's being better integrated into the NumPy ecosystem.\r\n\r\nIf xarray-Awkward integration works, there would be more reason to deprecate the Pandas-Awkward integration and I would recommend physicist users to consider xarray instead of Pandas. That would be an uphill trek\u2014I've counted a lot of questions from the last few years about Pandas and only one or two about xarray, but the ability to use their data is a strong selling point. Is there a Pandas \u2192 xarray cheat sheet that could help users who are considering migrating?\r\n\r\nAlso, my assumption is that xarray would wrap around Awkward Arrays, rather than the other way around. We'd have to be sure that the `__array_function__` methods chain appropriately.",
+     "createdAt":"2020-07-29T13:11:02Z",
+     "number":166652,
+     "replies":{
+      "nodes":[],
+      "totalCount":0
+     }
+    },
+    {
+     "author":{
+      "login":"benbovy"
+     },
+     "body":"> in my mind, it's \"n-dimensional Pandas.\"\r\n\r\nYes, that's right, but it can also be viewed as \"labelled numpy-like arrays\", or \"in-memory netcdf data model implementation\". This all may be a bit confusing, I admit.\r\n\r\n> Also, my assumption is that xarray would wrap around Awkward Arrays, rather than the other way around.\r\n\r\nAgreed, that's what I suggested in my comment above (sorry if I was misleading). I think that efforts towards integration between xarray and awkward array would most likely happen on the xarray side, so I opened https://github.com/pydata/xarray/issues/4285. \r\n\r\n> We'd have to be sure that the __array_function__ methods chain appropriately.\r\n\r\nI guess it would work (see https://github.com/pydata/xarray/pull/3117).\r\n\r\n> our structure-aware functions would still be usable\r\n\r\nFor any xarray variable object, the underlying array object can be accessed via the `.data` property.\r\n\r\n> I've counted a lot of questions from the last few years about Pandas and only one or two about xarray, but the ability to use their data is a strong selling point. Is there a Pandas \u2192 xarray cheat sheet that could help users who are considering migrating?\r\n\r\nI'm not aware of a Pandas \u2192 xarray cheat sheet, but I know @rabernat is going to work soon on improving the documentation, so that could be an idea.\r\n\r\nRegarding the data (formats), one possible issue here are the file formats used by xarray users (e.g., netcdf) vs. the formats used by pandas users (e.g., columnar storage, parquet). BTW, I saw in the Awkward user guide a (still empty) section about Zarr. Just curious, is it a format that Awkward will eventually support? (there is already good support for it in xarray).  \r\n",
+     "createdAt":"2020-07-29T14:26:22Z",
+     "number":166653,
+     "replies":{
+      "nodes":[],
+      "totalCount":0
+     }
+    },
+    {
+     "author":{
+      "login":"jpivarski"
+     },
+     "body":"> Regarding the data (formats), one possible issue here are the file formats used by xarray users (e.g., netcdf) vs. the formats used by pandas users (e.g., columnar storage, parquet). BTW, I saw in the Awkward user guide a (still empty) section about Zarr. Just curious, is it a format that Awkward will eventually support? (there is already good support for it in xarray).\r\n\r\nHere's what we're thinking: zarr-developers/zarr-specs#62. Awkward arrays can be decomposed into a set of flat arrays ([ak.to_arrayset](https://awkward-array.readthedocs.io/en/latest/_auto/ak.to_arrayset.html) and [ak.from_arrayset](https://awkward-array.readthedocs.io/en/latest/_auto/ak.from_arrayset.html)), and an interface that is aware that it's supposed to put them together and can pass the JSON-formatted \"Form\" that Awkward needs to do this reassembly would be able to transparently pass Awkward arrays to and from storage formats designed for rectilinear arrays. (Actually, all we really need is a key-value binary blob store.)\r\n\r\nFor the users that I'm directly supporting, particle physicists, ROOT files are the format of choice. The [Uproot](https://github.com/scikit-hep/uproot4) library reads ROOT files as Awkward arrays. For non-physicists, I've added [ak.to_parquet](https://awkward-array.readthedocs.io/en/latest/_auto/ak.to_parquet.html) and [ak.from_parquet](https://awkward-array.readthedocs.io/en/latest/_auto/ak.from_parquet.html), which go through pyarrow, as well as Arrow itself ([ak.to_arrow](https://awkward-array.readthedocs.io/en/latest/_auto/ak.to_arrow.html) and [ak.from_arrow](https://awkward-array.readthedocs.io/en/latest/_auto/ak.from_arrow.html)). All of these formats\u2014ROOT, Parquet, Arrow\u2014preserve the nested data structures without needing to break the Awkward array down into an array-set (and run the risk of someone getting a file full of array pieces and not knowing what to do with it).\r\n\r\nThe previous version of Awkward [had an interface to HDF5](https://github.com/scikit-hep/awkward-array#functions-for-inputoutput-and-conversion), but the recipient of the HDF5 file would need to know that they should open it through Awkward. If there was metadata in HDF5 or NetCDF to say, \"Pass this group through such-and-such an external function, raising an ImportError if it can't be loaded, and return the result as one array object,\" then that would solve the problem and we could re-introduce this I/O option. That's essentially what we're talking about doing with Zarr v3: adding an extension that says, \"Try to interpret this array-set in library X.\"",
+     "createdAt":"2020-07-29T15:37:40Z",
+     "number":166654,
+     "replies":{
+      "nodes":[],
+      "totalCount":0
+     }
+    },
+    {
+     "author":{
+      "login":"jpivarski"
+     },
+     "body":"Follow up on this topic at https://github.com/jpivarski/ragged/discussions/6",
+     "createdAt":"2023-12-30T18:47:32Z",
+     "number":7980090,
+     "replies":{
+      "nodes":[],
+      "totalCount":0
+     }
+    }
+   ],
+   "totalCount":10
+  },
+  "createdAt":"2019-12-03T08:25:01Z",
+  "number":27,
+  "title":"Using Awkward Arrays in or with Xarray",
+  "url":"https://github.com/scikit-hep/awkward/discussions/27"
+ },
+ {
+  "author":{
+   "login":"NumesSanguis"
+  },
+  "body":"I'm researching what is the best storage format for AwkwardArray (audio data) and Pandas DataFrames. My requirements are sliced access to arrays, which HDF5 seems best for.\r\nHowever, in a multi-process / multi-machine setting HDF5 is very limited in terms of reading, and especially writing: https://github.com/h5py/h5py/issues/1459\r\n\r\nI looked at ROOT, but since I'm not in the HEP field, it is quite a huge install for just I/O access.\r\nIt also seems not be too fast for reading? Since people are recommending temporary storage in HDF5 / .npy: https://stackoverflow.com/questions/58817554/what-the-fastest-most-memory-efficient-way-of-opening-a-root-ntuple-for-machine\r\nYou also mention [Zarr](https://zarr.readthedocs.io/en/stable/) as possible solution.\r\n\r\nIs there any intention to support Zarr?",
+  "comments":{
+   "nodes":[
+    {
+     "author":{
+      "login":"jpivarski"
+     },
+     "body":"I met with the Zarr authors in September to talk about setting up a two-way connection. Their primary focus is genetics, but just means they need fast access to large arrays like the rest of us. There is a peculiarly to that focus, however: their datasets of interest are mostly flat arrays with a possibly jagged inner dimension. The datasets I'm interested in (from a particle physics perspective) make heavy use of record structures with named fields.\r\n\r\nIf you have truly flat arrays (no records and no jaggedness), you can get away with a lightweight option. NumPy's npy/npz files are about as fast as you can get because there's no translation between disk and memory. If your data are highly compressible (such that decompression +reading fewer bytes is faster than reading more bytes), you can use npz's built-in zlib compression. HDF5 is for big, flat arrays, but it's a heavyweight option with a lot of knobs to tune before it gets efficient. But once it is properly tuned\u2014it's what supercomputers use in HPC.\r\n\r\nAnother lightweight, flat array option is blosc/bcolz, which does the decompression on demand\u2014it has such a fast decompressor that it stores the arrays in memory in compressed form and decompresses just before each calculation. The idea is that you transfer fewer bytes from main memory to your CPU cache (same idea as the above, but for the memory-to-cache transition, rather than the disk-to-memory transition).\r\n\r\nThe handling of jaggedness in Zarr isn't very efficient yet (and the users in genetics are avoiding it), but that will hopefully change in the upcoming year. ROOT pioneered jaggedness-handling, with records, but now Parquet does the same job. The Arrow library for Python, pyarrow, has the best Parquet reader/writer.\r\n\r\nAt larger scales, you might consider object stores, each with a column of data in it, though that means more manual work doing conversions if you need to turn the flat arrays into structures. Awkward 0.x has a protocol for saving full awkward arrays in flat-array (or raw-blob) backends, and thus you can save awkward arrays in npy/npz files and HDF5. Upgrading that to Awkward 1 isn't a high priority, though.\r\n\r\nAnother thing that you should know: ROOT is revamping its storage format to take advantage of the new ecosystem\u2014a class names RNTuple will be replacing TTree. The new RNTuple code is being developed in such a way that it can be used separately from the rest of the ROOT framework. You might be interested in that, though it's not ready for general users yet.",
+     "createdAt":"2019-12-05T11:34:21Z",
+     "number":166629,
+     "replies":{
+      "nodes":[],
+      "totalCount":0
+     }
+    },
+    {
+     "author":{
+      "login":"NumesSanguis"
+     },
+     "body":"Thank you for the elaborate reply and various suggestions.\r\n\r\nIn my case I deal with audio of varying length (most of the time), hence numpy is too limiting for a one-in-all solution for my purpose. Also, I need lazy loading (sliced access), and it seems that loading a `.npy` file would load all data into memory, right?\r\n\r\n> Awkward 0.x has a protocol for saving full awkward arrays in flat-array (or raw-blob) backends, and thus you can save awkward arrays in npy/npz files and HDF5. Upgrading that to Awkward 1 isn't a high priority, though.\r\n\r\nActually I already started to build my database with HDF5, since it can store AwkwardArrays and I assumed this was still possible from 1.x forward (would be good to clarify this in the Awkward 0.x docs?). I'm glad I started looking for other solutions, due to the parallel writing/reading problems of HDF5. Otherwise I would have been stuck with Awkward 0.x :')\r\n\r\n> ROOT pioneered jaggedness-handling, with records, but now Parquet does the same job. The Arrow library for Python, pyarrow, has the best Parquet reader/writer.\r\n\r\nI've started experimenting with Parquet now. Although in their documentation it is all about DataFrames, with AwkwardArray It seems to do the job ^-^ It's unfortunate that Parquet cannot include metadata like HDF5, but the integration with Arrow is a nice thing.\r\n\r\n> ROOT is revamping its storage format to take advantage of the new ecosystem\r\n\r\nThis sounds promising! Once this new format is ready, what would be the advantages / disadvantages compared to using Parquet instead?\r\n\r\n-----\r\nAbout Zarr, if my audio data is fixed length after all (some cases), would it be faster to store that data in Zarr format for lazy sliced loading, or would Parquet with Awkward be quite similar in performance? From my understanding, Numpy arrays cannot be stored in Parquet, right?\r\nI need my data in numpy format for Deep Learning.",
+     "createdAt":"2019-12-06T00:45:24Z",
+     "number":166630,
+     "replies":{
+      "nodes":[],
+      "totalCount":0
+     }
+    },
+    {
+     "author":{
+      "login":"jpivarski"
+     },
+     "body":"The difference between NumPy's npy and npz is that npz is a collection of npy binary blobs in a ZIP file. Each of those binary blobs can be separately loaded. If you have 1-dimensional audio arrays, each can be a different length and separately loaded by putting them all in an npz file. The granularity of lazy-loading is one binary blob (array), though there can be many in the file.\r\n\r\nAlso, if you put uncompressed data into npy files, they can be lazily loaded with finer granularity by loading that npz with [numpy.memmap](https://docs.scipy.org/doc/numpy/reference/generated/numpy.memmap.html). This uses the operating system's own virtual memory, which lazily loads in chunks of (probably) 4 kB. This happens whenever you read a file anyway (it's the operating system's cache); memory-mapping lets you access that cache directly, which can be good for _sequential_ access.\r\n\r\nZarr gives you more control over the lazy-loading, with some advantages over HDF5. (Maybe parallel reading? I'm hazy on the details.)\r\n\r\nYou can definitely store flat arrays in Parquet. The pyarrow library has a `to_numpy` (or similar) method to turn its internal array format into NumPy. You can definitely get at the data from a `pyarrow.Array` by passing its `buffers` into `numpy.frombuffer` (with the appropriate `dtype`), but that may be too low-level.\r\n\r\nI don't see the need for jagged arrays in your case because even though every audio sample is a different length, a single audio sample is simply one-dimensional, right? If your audio samples are reasonably large (kB to MB or more) and you don't have too many of them (thousands, not millions), then you can efficiently work with them using a separate NumPy array for each audio sample. Unless this isn't your case, you might be overthinking it.\r\n\r\nThe persistence layer for awkward will be reproduced in version 1.0, but not right away. (It's not one of the priority items. We should have old-to-new and new-to-old conversion functions to help with the transition, though.)",
+     "createdAt":"2019-12-06T01:50:00Z",
+     "number":166631,
+     "replies":{
+      "nodes":[],
+      "totalCount":0
+     }
+    },
+    {
+     "author":{
+      "login":"NumesSanguis"
+     },
+     "body":"Thank you for explaining the difference between `npy` and `npz`, and helping me brainstorm.\r\n\r\nI think I do need JaggedArrows / lazy loading. My audio data is 2D (2 channels), can be 5 min ~ 30 min, and I want to access them database-like. Sometimes I need only channel 0, other times both channels. Sometimes I need the full length, sometimes only the first 10 seconds. Sometimes I need to iterate over all audio samples, sometimes only a selection (e.g. indexed selection). This is all possible with JaggedArrows (I thought while I was typing this...):\r\n\r\n```python\r\n# only channel 0\r\njarr_2d[:, 0]\r\n# <JaggedArray [[0 1 2] [6 7] [10 11 12 13]] at 0x7f0943cb1710>\r\n\r\n# iterate over selection (array 0 and 2)\r\nselection_idx = np.array([0, 2])\r\nfor jarr in jarr_2d[selection_idx, :]:\r\n    print(jarr)\r\n    print(type(jarr[:]))\r\n    # how do I get a 2D numpy array back though?\r\n# [[0 1 2] [3 4 5]]\r\n# <class 'awkward.array.jagged.JaggedArray'>\r\n# [[10 11 12 13] [14 15 16 17]]\r\n# <class 'awkward.array.jagged.JaggedArray'>\r\n\r\n# first 2 values only\r\njarr_2d[:, 0, :2]\r\n# <JaggedArray [[0 1] [6 7] [10 11]] at 0x7f0943cb76d0>\r\n\r\n# PROBLEM: 3D slice not possible\r\njarr_2d[:, :, :2]\r\n# NotImplementedError: this implementation cannot slice a JaggedArray in more than two dimensions\r\n```\r\nWhen using .npy, I would need to create many files, and with .npz I would be forced to use a for-loop over `selection_idx` for returning the audio samples.\r\n\r\nSomewhat related SO question (fancy indexing): https://stackoverflow.com/questions/59150837/awkward-array-fancy-indexing-with-boolean-mask-along-named-axis/59150838\r\n\r\n-----\r\nSeems I misunderstood something while trying it out.\r\nApparently I can not do a selection like \"take first x elements of all 2D arrays\" `jarr_2d[:, :, :2]` -> Not implemented error\r\nAre there any plans to implement this?\r\n\r\nIs it possible to store a 2D numpy array (of the same length) without flattening it (because then we cannot easily select channel 0)?\r\nAs in not:\r\n```python\r\njarr_2d[0, :]\r\n# <JaggedArray [[0 1 2] [3 4 5]] at 0x7f0943d11750>\r\n```\r\nbut a return like this (not actual working code):\r\n```python\r\njarr_2d[0, :]  # not correct\r\n# array([[0, 1, 2],\r\n#        [3, 4, 5]])\r\n```\r\nI would prefer to keep the 2 channel audio as a 2D numpy array.\r\n\r\n-----\r\n\r\nEdit: Would being able to store 2D np arrays in AwkwardArray make it impossible to export it to Arrow / Parquet?\r\nWould something like this be possible to \"from audio fragment 0 and 1, channel 0, select first 2 elements\"?: flatten array --> store Parquet --> `dataset = awkward.fromparquet(foo.parquet)` --> `dataset[:2, :half_length][:2]` (with `half_length` automatically determined to avoid a for-loop).",
+     "createdAt":"2019-12-06T08:16:19Z",
+     "number":166632,
+     "replies":{
+      "nodes":[],
+      "totalCount":0
+     }
+    },
+    {
+     "author":{
+      "login":"jpivarski"
+     },
+     "body":"See the page labeled \"9/16\" (page 18 in the PDF) here: https://indico.cern.ch/event/773049/contributions/3473258/ The inability to generalize was exactly why I need to rewrite it. Each depth of nested slicing was a separate implementation using different NumPy tricks, and so I only went up to 2. Now that I can write for loops in C++, I've solved the problem of slicing arbitrary depths with a recursive function.\r\n\r\nAlthough I like promoting the use of Awkward, I also recommend the simplest solution to a problem. If you have a lot of 2-channel audio, why not save each audio clip in a separate two-dimensional array file (in which the second dimension has length 2)? These \"files\" may be separately loadable binary blobs in a NumPy npz file. If you want large audio clips to be only partially loaded, then make your database a collection of real files, possibly npy, in a directory and memory-map them. Or use Zarr or HDF5. Or [Dask](https://dask.org/). I don't see here any intrinsic need for jaggedness. (There are other applications that really need it, and I obviously like finding other such cases, but I honestly don't see it here.) There's no reason, for instance, to make all of your samples a single array.\r\n\r\nAssuming high-fidelity audio samples for numeric processing, not just listening, such as 2 channels of 64-bit floating point numbers at 48 kHz, 5 minutes is 220 MB and 30 minutes is 1320 MB (48000 \u00d7 60 \u00d7 #minutes \u00d7 2 \u00d7 8 / 1024 / 1024). On a computer with multiple GB of RAM, you can load several of these in their entirety at any given time and do computations across them (adding or correlating or whatever). Also, the smallest ones are big enough that if you do a Python for loop over audio samples, you _will not_ be dominated by Python overhead. Your data's already in a sweet spot where each unit is big enough to put into Python variables and small enough to fully load into memory (although if this is a problem, memory-mapping, Zarr, HDF5, or Dask).",
+     "createdAt":"2019-12-06T13:38:42Z",
+     "number":166633,
+     "replies":{
+      "nodes":[],
+      "totalCount":0
+     }
+    },
+    {
+     "author":{
+      "login":"NumesSanguis"
+     },
+     "body":"Thank you for linking that PDF and the other approaches. It was very informative.\r\n\r\nI still think AwkwardArray is beneficial in my situation, even for things not directly related to performance (code simplicity/flexibility, parquet/arrow support, selecting relevant arrays with numpy arrays (instead of strings), improvements with Awkward 1.0 (3D+ array slicing), etc).\r\n\r\nI didn't fully sketch my current situation, because that is out of the scope of this GitHub issue. I would like to tell you into more detail if you're up to it? You can send me an email to address shown in my profile (https://github.com/NumesSanguis). Then we can arrange a audio/video chat, e.g. with https://zoom.us/ ?",
+     "createdAt":"2019-12-10T07:38:09Z",
+     "number":166634,
+     "replies":{
+      "nodes":[],
+      "totalCount":0
+     }
+    },
+    {
+     "author":{
+      "login":"jpivarski"
+     },
+     "body":"I'm willing to accept that there's something about your situation that you can't use many flat arrays. (Actually, it's a pet peeve of mine when people ignore arguments that situation X is different from situation Y and therefore requires different software. I won't do the same!)\r\n\r\nThat said, persistence is low on the priority list for Awkward 1. Using a storage format like npy/npz, Zarr, HDF5, Arrow, Parquet would be a matter of unpacking the Awkward array into its constituents and then re-packing it on the other side. That's pretty simple if the data structure is simple and known. It gets more complicated when you want to do it in general, for any structure, and that's the low-priority item for me.\r\n\r\nWe can talk by Zoom if you set up the meeting. (Zoom it's one that I've never set up, but I've successfully joined meetings.) I'm generally available 8am to 4pm U.S. Central time. We should probably continue by email: pivarski at Princeton (edu).",
+     "createdAt":"2019-12-10T12:22:33Z",
+     "number":166635,
+     "replies":{
+      "nodes":[],
+      "totalCount":0
+     }
+    },
+    {
+     "author":{
+      "login":"NumesSanguis"
+     },
+     "body":"Currently I'm attempting the (un)packing of the AwkwardArray into Parquet, as you can see here: https://stackoverflow.com/questions/59264202/awkward-array-how-to-get-numpy-array-after-storing-as-parquet-not-bitmasked\r\n\r\nI've send you an email, thank you.",
+     "createdAt":"2019-12-11T01:37:25Z",
+     "number":166636,
+     "replies":{
+      "nodes":[],
+      "totalCount":0
+     }
+    },
+    {
+     "author":{
+      "login":"NumesSanguis"
+     },
+     "body":"Thank you again for helping me out. Since this issue drifted far from the original question (Zarr support), I'll be closing it. If Zarr support is still wanted, I think it's better to create a new issue for it.",
+     "createdAt":"2019-12-12T09:02:15Z",
+     "number":166637,
+     "replies":{
+      "nodes":[],
+      "totalCount":0
+     }
+    }
+   ],
+   "totalCount":9
+  },
+  "createdAt":"2019-12-05T03:00:03Z",
+  "number":29,
+  "title":"Pulling Awkward Arrays from or pushing them to Zarr (and maybe other storage mechanisms)",
+  "url":"https://github.com/scikit-hep/awkward/discussions/29"
+ }
+]

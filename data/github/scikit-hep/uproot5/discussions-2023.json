@@ -1,0 +1,1258 @@
+[
+ {
+  "author":{
+   "login":"a-akram"
+  },
+  "body":"Dear All, \r\n\r\nI am trying to write a root file inside a for-loop in **Python**. I have a `process()` that returns a DataFrame per event with just two columns: `hit_id, track_id`. Now I want to write this DataFrame as a TTree to a root file. Note that the size of DataFrame changes in each event. This is what I have tried:\r\n\r\n```\r\nroot_file = uproot.recreate(os.path.join(outputdir, \"trackml.root\"))\r\n\r\nfor filename in all_files[:max_evts]:\r\n    df = process(filename, **vars(args))    # df >> {hit_id, track_id}\r\n    root_file[\"TrackML\"] = df\r\n\r\nroot_file.close()\r\n```\r\n\r\nEverything runs perfectly. But when I read the `trackml.root` then I see multiple instances of `TrackML` TTree as `TrackML;1, TrackML;2,..., TrackML;100`. What I was expecting is a single `TrackML` TTree that has events up to `max_evts` so I can loop over `trackml.root` access `hit_id, track_id` event by event later inside **ROOT** environment.\r\n\r\nAm I missing something? Is everything all right?",
+  "comments":{
+   "nodes":[
+    {
+     "author":{
+      "login":"jpivarski"
+     },
+     "body":"I answered this [on Gitter](https://gitter.im/Scikit-HEP/uproot), but I should copy our conversation here so that it's useful to others in the future.\r\n\r\n**Jim:**\r\n\r\nHi @a-akram! What's happening here is that Uproot follows ROOT's way of adding same-name objects to a directory: it gives each one a different \"cycle number\" to distinguish them. If `root_file` were a Python dict, each `df` would overwrite the previous one, but ROOT keeps them all, and the cycle number is like a version number.\r\n\r\nBut I think it's likely that you want to combine all of the `df`s into one big TTree. In that case, use assignment (what you have above) to get the first one in, which defines the Tree, and all subsequent `df`s can fill the TTree using [uproot.WritableTree.extend](https://uproot.readthedocs.io/en/latest/uproot.writing.writable.WritableTree.html#extend).\r\n\r\nIn writing these scripts, I end up creating a `first_time` boolean to switch between assignment on the first time and extend on all other times through the loop.\r\n\r\n**Adeel:**\r\n\r\nThanks for clarification. It not clear to me how to apply the extend() here. In above code example, is the statement `root_file[\"TrackML\"].extend(df)` will work, ofcourse that will used from the second iteration?\r\n\r\n_(later)_\r\n\r\nThanks it perfectly worked. I have another question. Is there a way to store TClonesArray?\r\n\r\n**Jim:**\r\n\r\nThere is not a way to write the Python data as a specified ROOT/C++ type, such as TClonesArray. Sorry! (Each different ROOT/C++ type is a different serialization format, so it would essentially be a new project for each one. TClonesArray has a particularly odd serialization, as seen in the code that reads TClonesArray.)",
+     "createdAt":"2023-01-12T18:46:26Z",
+     "number":4670661,
+     "replies":{
+      "nodes":[],
+      "totalCount":0
+     }
+    }
+   ],
+   "totalCount":1
+  },
+  "createdAt":"2023-01-12T13:41:57Z",
+  "number":815,
+  "title":"Writing TTree in ROOT file inside a loop",
+  "url":"https://github.com/scikit-hep/uproot5/discussions/815"
+ },
+ {
+  "author":{
+   "login":"TerKim"
+  },
+  "body":"Hi, I'm new to Uproot, and ROOT in general, with a very lacking foundation of the data structures of ROOT. I originally used ROOT directly to access and plot for example ev.pmt.charge, with no issue. I wanted to use Uproot due to its ease of use compared to the conventional ROOT. Anyway, I wanted to ask how to access the ev.pmt in the TTree, and plot something like ev.pmt.charge (or time ,dTime, dCharge).\r\n\r\nI did the following to plot the data, but I get an empty plot (most likely due to me missing or misusing something):\r\n`file = uproot.open(\"output.root\")\r\ntree = file[\"T\"]\r\n\r\nev_pmt = uproot.containers.STLVector(tree[\"ds/ev/ev.pmt\"])\r\n\r\ncharge_data = np.array([x.charge for x in ev_pmt])\r\ncharge_df = pd.DataFrame(charge_data, columns=[\"charge\"])\r\n\r\n# Create a histogram of the charge data\r\ncharge_df.plot(kind='hist', y='charge', bins = 100)\r\nplt.xlabel(\"Charge\")\r\nplt.ylabel(\"Frequency\")\r\nplt.title(\"Histogram of Charge\")\r\nplt.show()\r\n\r\n# Summary of charge data:\r\nprint(charge_df.describe())`\r\n\r\nI hope to have some updated code to help me with this as I've been stuck on this for quite a while now, and I have a deadline coming up for thesis work. Any help would be much appreciated. \r\nAlso, if possible, could you show how to apply cuts aswell? I posted the root file as a zip file for anyone to help. Thanks in advance to everybody who helps.\r\n[output.zip](https://github.com/scikit-hep/uproot5/files/10729162/output.zip)\r\n\r\nP.S. Forgive me if someone asked a similar question, I could not find one if there was.",
+  "comments":{
+   "nodes":[
+    {
+     "author":{
+      "login":"agoose77"
+     },
+     "body":"The proper way to read from a single branch in `uproot` is to invoke the `.array()` method, e.g.\r\n```python\r\nimport uproot\r\nwith uproot.open(\"output.root:T\") as tree:\r\n    ev_pmt = tree[\"ds/ev/ev.pmt\"].array()\r\n```\r\nIn `uproot==5.*`, this will use Awkward Array to represent the result. For your data, this does not succeed on my machine:\r\n```pytb\r\n---------------------------------------------------------------------------\r\nNotImplementedError                       Traceback (most recent call last)\r\nCell In [7], line 2\r\n      1 with uproot.open(\"/home/angus/Downloads/output.root:T\") as tree:\r\n----> 2     ev_pmt = tree[\"ds/ev/ev.pmt\"].array()\r\n\r\nFile ~/Git/uproot5/src/uproot/behaviors/TBranch.py:1818, in TBranch.array(self, interpretation, entry_start, entry_stop, decompression_executor, interpretation_executor, array_cache, library, ak_add_doc)\r\n   1815                 ranges_or_baskets.append((branch, basket_num, range_or_basket))\r\n   1817 interp_options = {\"ak_add_doc\": ak_add_doc}\r\n-> 1818 _ranges_or_baskets_to_arrays(\r\n   1819     self,\r\n   1820     ranges_or_baskets,\r\n   1821     branchid_interpretation,\r\n   1822     entry_start,\r\n   1823     entry_stop,\r\n   1824     decompression_executor,\r\n   1825     interpretation_executor,\r\n   1826     library,\r\n   1827     arrays,\r\n   1828     False,\r\n   1829     interp_options,\r\n   1830 )\r\n   1832 _fix_asgrouped(\r\n   1833     arrays,\r\n   1834     expression_context,\r\n   (...)\r\n   1838     ak_add_doc,\r\n   1839 )\r\n   1841 if array_cache is not None:\r\n\r\nFile ~/Git/uproot5/src/uproot/behaviors/TBranch.py:3124, in _ranges_or_baskets_to_arrays(hasbranches, ranges_or_baskets, branchid_interpretation, entry_start, entry_stop, decompression_executor, interpretation_executor, library, arrays, update_ranges_or_baskets, interp_options)\r\n   3121     pass\r\n   3123 elif isinstance(obj, tuple) and len(obj) == 3:\r\n-> 3124     uproot.source.futures.delayed_raise(*obj)\r\n   3126 else:\r\n   3127     raise AssertionError(obj)\r\n\r\nFile ~/Git/uproot5/src/uproot/source/futures.py:36, in delayed_raise(exception_class, exception_value, traceback)\r\n     32 def delayed_raise(exception_class, exception_value, traceback):\r\n     33     \"\"\"\r\n     34     Raise an exception from a background thread on the main thread.\r\n     35     \"\"\"\r\n---> 36     raise exception_value.with_traceback(traceback)\r\n\r\nFile ~/Git/uproot5/src/uproot/behaviors/TBranch.py:3066, in _ranges_or_baskets_to_arrays.<locals>.basket_to_array(basket)\r\n   3063 context = dict(branch.context)\r\n   3064 context[\"forth\"] = forth_context[branch.cache_key]\r\n-> 3066 basket_arrays[basket.basket_num] = interpretation.basket_array(\r\n   3067     basket.data,\r\n   3068     basket.byte_offsets,\r\n   3069     basket,\r\n   3070     branch,\r\n   3071     context,\r\n   3072     basket.member(\"fKeylen\"),\r\n   3073     library,\r\n   3074     interp_options,\r\n   3075 )\r\n   3076 if basket.num_entries != len(basket_arrays[basket.basket_num]):\r\n   3077     raise ValueError(\r\n   3078         \"\"\"basket {} in tree/branch {} has the wrong number of entries \"\"\"\r\n   3079         \"\"\"(expected {}, obtained {}) when interpreted as {}\r\n   (...)\r\n   3087         )\r\n   3088     )\r\n\r\nFile ~/Git/uproot5/src/uproot/interpretation/objects.py:139, in AsObjects.basket_array(self, data, byte_offsets, basket, branch, context, cursor_offset, library, options)\r\n    136 assert basket.byte_offsets is not None\r\n    138 if self._forth and isinstance(library, uproot.interpretation.library.Awkward):\r\n--> 139     output = self.basket_array_forth(\r\n    140         data,\r\n    141         byte_offsets,\r\n    142         basket,\r\n    143         branch,\r\n    144         context,\r\n    145         cursor_offset,\r\n    146         library,\r\n    147         options,\r\n    148     )\r\n    149 else:\r\n    150     output = ObjectArray(\r\n    151         self._model, branch, context, byte_offsets, data, cursor_offset\r\n    152     ).to_numpy()\r\n\r\nFile ~/Git/uproot5/src/uproot/interpretation/objects.py:206, in AsObjects.basket_array_forth(self, data, byte_offsets, basket, branch, context, cursor_offset, library, options)\r\n    200 with self._forth_lock:\r\n    201     # all threads have to wait until complete_forth_code is ready\r\n    203     if self._complete_forth_code is None:\r\n    204         # another thread didn't make it while this thread waited\r\n    205         # this thread tries to make it now\r\n--> 206         output = self._discover_forth(\r\n    207             data, byte_offsets, branch, context, cursor_offset\r\n    208         )\r\n    210         if output is not None:\r\n    211             # Forth discovery was unsuccessful; return Python-derived\r\n    212             # output and maybe another basket will be more fruitful\r\n    213             self.hook_after_basket_array(\r\n    214                 data=data,\r\n    215                 byte_offsets=byte_offsets,\r\n   (...)\r\n    222                 options=options,\r\n    223             )\r\n\r\nFile ~/Git/uproot5/src/uproot/interpretation/objects.py:286, in AsObjects._discover_forth(self, data, byte_offsets, branch, context, cursor_offset)\r\n    284 if \"forth\" in context.keys():\r\n    285     context[\"forth\"].gen.var_set = False\r\n--> 286 output[i] = self._model.read(\r\n    287     chunk,\r\n    288     cursor,\r\n    289     context,\r\n    290     branch.file,\r\n    291     branch.file.detached,\r\n    292     branch,\r\n    293 )\r\n    294 if context[\"cancel_forth\"] and \"forth\" in context.keys():\r\n    295     del context[\"forth\"]\r\n\r\nFile ~/Git/uproot5/src/uproot/containers.py:716, in AsArray.read(self, chunk, cursor, context, file, selffile, parent, header)\r\n    714                     forth_stash.add_to_pre(f\"{temp_jump} stream skip\\n\")\r\n    715             if is_memberwise:\r\n--> 716                 raise NotImplementedError(\r\n    717                     \"\"\"memberwise serialization of {}\r\n    718 in file {}\"\"\".format(\r\n    719                         type(self).__name__, selffile.file_path\r\n    720                     )\r\n    721                 )\r\n    723             if isinstance(self._values, numpy.dtype):\r\n    724                 remainder = chunk.get(\r\n    725                     cursor.index, cursor.index + num_bytes, cursor, context\r\n    726                 )\r\n\r\nNotImplementedError: memberwise serialization of AsArray\r\nin file /home/angus/Downloads/output.root\r\n```\r\n\r\nIf we inspect the interpretation of the data, we see\r\n```pycon\r\n>>> with uproot.open(\"output.root:T\") as tree:\r\n>>>     ev_pmt = tree[\"ds/ev/ev.pmt\"]\r\n>>>     print(ev_pmt.interpretation)\r\nAsObjects(AsArray(True, False, AsVector(False, Model_RAT_3a3a_DS_3a3a_PMT), ()))\r\n```\r\n\r\nIt looks like you're reading a structure, and uproot needs to deserialise it memberwise. We don't support all of the various peculiar ways that ROOT can serialise an object, though @ioanaif and @jpivarski can pick this up and tell you more, such as where to go next.",
+     "createdAt":"2023-02-14T08:26:59Z",
+     "number":4967902,
+     "replies":{
+      "nodes":[
+       {
+        "author":{
+         "login":"TerKim"
+        },
+        "body":"I see, I look forward to more guidance. Thanks for letting me know.",
+        "createdAt":"2023-02-14T14:44:01Z",
+        "number":4971625
+       }
+      ],
+      "totalCount":1
+     }
+    }
+   ],
+   "totalCount":1
+  },
+  "createdAt":"2023-02-14T05:45:27Z",
+  "number":823,
+  "title":"How to access and plot a histogram from an std::vector",
+  "url":"https://github.com/scikit-hep/uproot5/discussions/823"
+ },
+ {
+  "author":{
+   "login":"jpivarski"
+  },
+  "body":"## New features\r\n\r\n* feat: Infrastructure for writing of RNTuple (incomplete functionality) by @Moelf in https://github.com/scikit-hep/uproot5/pull/705\r\n* feat: [WIP] RNTuple Basic Writing by @Moelf in https://github.com/scikit-hep/uproot5/pull/813\r\n\r\n## Bug-fixes and performance\r\n\r\n* fix: an uproot.dask test was wrong; revealed by new dask-awkward. by @jpivarski in https://github.com/scikit-hep/uproot5/pull/812\r\n* fix: separate AwkwardForth machine for each TBranch context. by @jpivarski in https://github.com/scikit-hep/uproot5/pull/819\r\n* fix: separate ZstdDecompressor for each thread. by @jpivarski in https://github.com/scikit-hep/uproot5/pull/820\r\n\r\n## Other\r\n\r\n* ci: [pre-commit.ci] pre-commit autoupdate by @pre-commit-ci in https://github.com/scikit-hep/uproot5/pull/810\r\n* ci: pre-commit autoupdate by @pre-commit-ci in https://github.com/scikit-hep/uproot5/pull/821\r\n\r\n**Full Changelog**: https://github.com/scikit-hep/uproot5/compare/v5.0.2...v5.0.3\n\n<hr /><em>This discussion was created from the release <a href='https://github.com/scikit-hep/uproot5/releases/tag/v5.0.3'>Version 5.0.3</a>.</em>",
+  "comments":{
+   "nodes":[],
+   "totalCount":0
+  },
+  "createdAt":"2023-02-15T19:44:27Z",
+  "number":824,
+  "title":"Version 5.0.3",
+  "url":"https://github.com/scikit-hep/uproot5/discussions/824"
+ },
+ {
+  "author":{
+   "login":"renyhp"
+  },
+  "body":"Hi, I have just installed uproot, but I can't get it to read a tree.\r\n\r\nMy code is very simple:\r\n\r\n```python3\r\nimport uproot\r\nf = uproot.reading.open(\"myfile.root\")\r\nt = f.get(\"aTree\")\r\nt['TheOnlyBranch'].array()\r\n```\r\n\r\nThis just crashes with this stacktrace:\r\n```text\r\nTraceback (most recent call last):\r\n  File \"<stdin>\", line 1, in <module>\r\n  File \"/tmp/venv/lib/python3.10/site-packages/uproot/behaviors/TBranch.py\", line 834, in arrays\r\n    _ranges_or_baskets_to_arrays(\r\n  File \"/tmp/venv/lib/python3.10/site-packages/uproot/behaviors/TBranch.py\", line 3124, in _ranges_or_baskets_to_arrays\r\n    uproot.source.futures.delayed_raise(*obj)\r\n  File \"/tmp/venv/lib/python3.10/site-packages/uproot/source/futures.py\", line 36, in delayed_raise\r\n    raise exception_value.with_traceback(traceback)\r\n  File \"/tmp/venv/lib/python3.10/site-packages/uproot/behaviors/TBranch.py\", line 3066, in basket_to_array\r\n    basket_arrays[basket.basket_num] = interpretation.basket_array(\r\n  File \"/tmp/venv/lib/python3.10/site-packages/uproot/interpretation/objects.py\", line 139, in basket_array\r\n    output = self.basket_array_forth(\r\n  File \"/tmp/venv/lib/python3.10/site-packages/uproot/interpretation/objects.py\", line 206, in basket_array_forth\r\n    output = self._discover_forth(\r\n  File \"/tmp/venv/lib/python3.10/site-packages/uproot/interpretation/objects.py\", line 286, in _discover_forth\r\n    output[i] = self._model.read(\r\n  File \"/tmp/venv/lib/python3.10/site-packages/uproot/containers.py\", line 609, in read\r\n    return uproot.deserialization.read_object_any(\r\n  File \"/tmp/venv/lib/python3.10/site-packages/uproot/deserialization.py\", line 274, in read_object_any\r\n    obj = cls.read(chunk, cursor, context, file, selffile, parent)\r\n  File \"/tmp/venv/lib/python3.10/site-packages/uproot/model.py\", line 1372, in read\r\n    versioned_cls.read(\r\n  File \"/tmp/venv/lib/python3.10/site-packages/uproot/model.py\", line 867, in read\r\n    self.read_members(chunk, cursor, context, file)\r\n  File \"<dynamic>\", line 567, in read_members\r\nKeyError: dtype('int8')\r\n```\r\n\r\nThe branch does contain subbranches, some of them are of type `int8` and `uint8`.\r\n\r\nAm I doing anything wrong or is this a bug to be reported?",
+  "comments":{
+   "nodes":[
+    {
+     "author":{
+      "login":"Moelf"
+     },
+     "body":"do you have a sample file?",
+     "createdAt":"2023-02-16T16:26:47Z",
+     "number":4998397,
+     "replies":{
+      "nodes":[
+       {
+        "author":{
+         "login":"renyhp"
+        },
+        "body":"Sorry, I'm afraid I cannot share it. Any investigation I can do myself?",
+        "createdAt":"2023-02-16T16:32:14Z",
+        "number":4998444
+       },
+       {
+        "author":{
+         "login":"tamasgal"
+        },
+        "body":"It's a bit difficult to help but you could e.g. show `t['TheOnlyBranch'].interpretation`",
+        "createdAt":"2023-02-16T16:40:07Z",
+        "number":4998522
+       },
+       {
+        "author":{
+         "login":"jpivarski"
+        },
+        "body":"Does the branch have subbranches?\r\n\r\n```python\r\nt[\"TheOnlyBranch\"].keys()\r\n```\r\n\r\nMaybe some subbranches are readable and others not. Trying individual subbranches can help you/us narrow down on what, exactly, is failing. (Branches of type `int8` and `uint8` should be perfectly fine: we have some of those in our test suite.)\r\n\r\nIf you're allowed to share the names and types of branches, with the data itself, then you can show us the result of\r\n\r\n```python\r\nt.show()\r\n```\r\n\r\nIt's failing in `read_object_any`, which doesn't get invoked for simple branch types like `int8` and `uint8`. It's also trying to build an AwkwardForth VM, which only happens on a branch of type `AsObjects` (i.e. much more complex than numerical or even jagged/ragged arrays of numerical data).\r\n\r\nAfter getting the KeyError, the class that was created to read this particular type of complex data structure should exist in `uproot.dynamic`. If you can find the relevant one for your data, print that class object's `class_code`:\r\n\r\n```python\r\nprint(uproot.dynamic.WhateverYourClassIsNamed.class_code)\r\n```\r\n\r\nIf you can't find it in `uproot.dynamic`, it should also be in the `AsObjects` interpretation:\r\n\r\n```python\r\nprint(branch.interpretation.model.class_code)\r\n```\r\n\r\n(Although if the class itself is inside of an STL vector or something, you'd need to dig through the `AsVector.values` to get to the class object itself, which is what has the `class_code` that you can print.)\r\n\r\nThe actual error happens on line 567 of this dynamically generated class's code. If you're allowed to share type information but not values, you can post that class code here; it's a strict function of type, not any data values.",
+        "createdAt":"2023-02-16T16:50:30Z",
+        "number":4998641
+       },
+       {
+        "author":{
+         "login":"renyhp"
+        },
+        "body":"Found it, thanks!\r\n\r\nIt is, in fact in one of the few subbranches that are complex objects. However this should only be holding numeric values, and a `TVector3`... \r\n\r\nHere is the class code (sorry for a bit of obfuscation...): [class_code.txt](https://github.com/scikit-hep/uproot5/files/10758713/class_code.txt)\r\n",
+        "createdAt":"2023-02-16T17:22:02Z",
+        "number":4998920
+       },
+       {
+        "author":{
+         "login":"jpivarski"
+        },
+        "body":"Using the class_code and line number from the stack trace, I found what is very likely the error.\r\n\r\n#827 has a bug-fix. Would you be able to test it by installing Uproot from that git branch?\r\n\r\n```bash\r\npip uninstall uproot   # or remove it from conda; whichever package manager you're using\r\n\r\ngit clone https://github.com/scikit-hep/uproot5.git\r\ncd uproot5\r\ngit checkout jpivarski/fix-missing-dtype-in-forth-symbol_dict\r\npip install -e .\r\n\r\n# try reading the \"SubBranch\" class that has TVector3, a few arrays, and lots of scalars...\r\n```\r\n\r\nIf that works, you can pip uninstall this Uproot and reinstall it with pip or conda when the next patch release of Uproot goes out.\r\n\r\nThanks!",
+        "createdAt":"2023-02-16T17:40:35Z",
+        "number":4999127
+       },
+       {
+        "author":{
+         "login":"renyhp"
+        },
+        "body":"Well, now that I'm trying to access the same branch, I get this error:\r\n\r\n```text\r\nTraceback (most recent call last):\r\n  File \"/tmp/uproot5/src/uproot/interpretation/objects.py\", line 232, in basket_array_forth\r\n    context[\"forth\"].vm = awkward.forth.ForthMachine64(\r\nValueError: in AwkwardForth source code, line 17 col 1, output dtype not recognized:\r\n\r\n    output node13-data \r\n\r\n(https://github.com/scikit-hep/awkward/blob/awkward-cpp-9/awkward-cpp/src/libawkward/forth/ForthMachine.cpp#L1985)\r\n\r\nThe above exception was the direct cause of the following exception:\r\n\r\nTraceback (most recent call last):\r\n  File \"<stdin>\", line 1, in <module>\r\n  File \"/tmp/uproot5/src/uproot/behaviors/TBranch.py\", line 1818, in array\r\n    _ranges_or_baskets_to_arrays(\r\n  File \"/tmp/uproot5/src/uproot/behaviors/TBranch.py\", line 3124, in _ranges_or_baskets_to_arrays\r\n    uproot.source.futures.delayed_raise(*obj)\r\n  File \"/tmp/uproot5/src/uproot/source/futures.py\", line 36, in delayed_raise\r\n    raise exception_value.with_traceback(traceback)\r\n  File \"/tmp/uproot5/src/uproot/behaviors/TBranch.py\", line 3066, in basket_to_array\r\n    basket_arrays[basket.basket_num] = interpretation.basket_array(\r\n  File \"/tmp/uproot5/src/uproot/interpretation/objects.py\", line 139, in basket_array\r\n    output = self.basket_array_forth(\r\n  File \"/tmp/uproot5/src/uproot/interpretation/objects.py\", line 236, in basket_array_forth\r\n    raise type(err)(\r\nValueError: in AwkwardForth source code, line 17 col 1, output dtype not recognized:\r\n\r\n    output node13-data \r\n\r\n(https://github.com/scikit-hep/awkward/blob/awkward-cpp-9/awkward-cpp/src/libawkward/forth/ForthMachine.cpp#L1985)\r\n\r\nForth code generated for this data type:\r\n\r\ninput stream\r\n    input byteoffsets\r\n    input bytestops\r\n    output node0-data float64\r\noutput node1-data float64\r\noutput node2-data float64\r\noutput node3-data float64\r\noutput node4-data float64\r\noutput node5-data float64\r\noutput node6-data float64\r\noutput node7-data float64\r\noutput node8-data float32\r\noutput node9-data float32\r\noutput node10-data float32\r\noutput node11-data float32\r\noutput node12-data float32\r\noutput node13-data None\r\noutput node14-data bool\r\noutput node15-data bool\r\noutput node16-data bool\r\noutput node17-data bool\r\noutput node18-data float32\r\noutput node19-data float32\r\noutput node20-data float64\r\noutput node21-data float64\r\noutput node22-data float64\r\noutput node23-data bool\r\noutput node24-data bool\r\noutput node25-data float64\r\noutput node26-data float64\r\noutput node27-data None\r\noutput node28-data float32\r\noutput node29-data float32\r\noutput node30-data float32\r\noutput node31-data None\r\noutput node32-data float32\r\noutput node33-data bool\r\noutput node34-data bool\r\noutput node35-data None\r\noutput node36-data None\r\noutput node37-data float32\r\noutput node38-offsets int64\r\noutput node39-data float64\r\noutput node40-data float64\r\noutput node41-data float64\r\noutput node42-data float64\r\noutput node43-data float64\r\noutput node44-data float32\r\noutput node45-data float32\r\noutput node46-data float32\r\noutput node47-data float32\r\noutput node48-data float32\r\noutput node49-data None\r\noutput node50-data bool\r\noutput node51-data bool\r\noutput node52-data bool\r\noutput node53-data bool\r\noutput node54-data float32\r\noutput node55-data float32\r\noutput node56-data float64\r\noutput node57-data float64\r\noutput node58-data float64\r\noutput node59-data bool\r\noutput node60-data bool\r\noutput node61-data float64\r\noutput node62-data float64\r\noutput node63-data None\r\noutput node64-data float32\r\noutput node65-data float32\r\noutput node66-data float32\r\noutput node67-data None\r\noutput node68-data float32\r\noutput node69-data bool\r\noutput node70-data bool\r\noutput node71-data None\r\noutput node72-data None\r\noutput node73-data int32\r\noutput node74-offsets int64\r\noutput node75-data None\r\noutput node76-offsets int64\r\noutput node77-data float32\r\noutput node78-offsets int64\r\noutput node79-data float32\r\noutput node80-offsets int64\r\noutput node81-data float32\r\noutput node82-offsets int64\r\noutput node83-data float32\r\noutput node84-offsets int64\r\noutput node85-data float32\r\noutput node86-offsets int64\r\n\r\n    0 node38-offsets <- stack\r\n0 node74-offsets <- stack\r\n0 node76-offsets <- stack\r\n0 node78-offsets <- stack\r\n0 node80-offsets <- stack\r\n0 node82-offsets <- stack\r\n0 node84-offsets <- stack\r\n0 node86-offsets <- stack\r\n\r\n    0 do\r\n    byteoffsets I-> stack\r\n    stream seek\r\n    0 stream skip \r\n6 stream skip\r\n10 stream skip \r\n0 stream skip \r\n6 stream skip\r\n10 stream skip \r\nstream !d-> node0-data\r\nstream !d-> node1-data\r\nstream !d-> node2-data\r\nstream !d-> node3-data\r\nstream !d-> node4-data\r\nstream !d-> node5-data\r\nstream !d-> node6-data\r\nstream !d-> node7-data\r\nstream !f-> node8-data\r\nstream !f-> node9-data\r\nstream !f-> node10-data\r\nstream !f-> node11-data\r\nstream !f-> node12-data\r\nstream !b-> node13-data\r\nstream !?-> node14-data\r\nstream !?-> node15-data\r\nstream !?-> node16-data\r\nstream !?-> node17-data\r\nstream !f-> node18-data\r\nstream !f-> node19-data\r\nstream !d-> node20-data\r\nstream !d-> node21-data\r\nstream !d-> node22-data\r\nstream !?-> node23-data\r\nstream !?-> node24-data\r\nstream !d-> node25-data\r\nstream !d-> node26-data\r\nstream !b-> node27-data\r\nstream !f-> node28-data\r\nstream !f-> node29-data\r\nstream !f-> node30-data\r\nstream !b-> node31-data\r\nstream !f-> node32-data\r\nstream !?-> node33-data\r\nstream !?-> node34-data\r\nstream !b-> node35-data\r\nstream !b-> node36-data\r\n5 dup node38-offsets +<- stack \r\n stream #!f-> node37-data\r\nstream !d-> node39-data\r\nstream !d-> node40-data\r\nstream !d-> node41-data\r\nstream !d-> node42-data\r\nstream !d-> node43-data\r\nstream !f-> node44-data\r\nstream !f-> node45-data\r\nstream !f-> node46-data\r\nstream !f-> node47-data\r\nstream !f-> node48-data\r\nstream !b-> node49-data\r\nstream !?-> node50-data\r\nstream !?-> node51-data\r\nstream !?-> node52-data\r\nstream !?-> node53-data\r\nstream !f-> node54-data\r\nstream !f-> node55-data\r\nstream !d-> node56-data\r\nstream !d-> node57-data\r\nstream !d-> node58-data\r\nstream !?-> node59-data\r\nstream !?-> node60-data\r\nstream !d-> node61-data\r\nstream !d-> node62-data\r\nstream !b-> node63-data\r\nstream !f-> node64-data\r\nstream !f-> node65-data\r\nstream !f-> node66-data\r\nstream !b-> node67-data\r\nstream !f-> node68-data\r\nstream !?-> node69-data\r\nstream !?-> node70-data\r\nstream !b-> node71-data\r\nstream !b-> node72-data\r\n2 dup node74-offsets +<- stack \r\n stream #!i-> node73-data\r\n2 dup node76-offsets +<- stack \r\n stream #!b-> node75-data\r\n2 dup node78-offsets +<- stack \r\n stream #!f-> node77-data\r\n2 dup node80-offsets +<- stack \r\n stream #!f-> node79-data\r\n2 dup node82-offsets +<- stack \r\n stream #!f-> node81-data\r\n2 dup node84-offsets +<- stack \r\n stream #!f-> node83-data\r\n2 dup node86-offsets +<- stack \r\n stream #!f-> node85-data\r\n\r\n    loop\r\n    \r\n```",
+        "createdAt":"2023-02-17T09:57:03Z",
+        "number":5008219
+       },
+       {
+        "author":{
+         "login":"renyhp"
+        },
+        "body":"I tried patching `_awkward_forth.convert_dtype()` by adding\r\n\r\n```python3\r\n    elif format == \"b\":\r\n        return \"int8\"\r\n```\r\n\r\nbut now I get:\r\n\r\n```text\r\nTraceback (most recent call last):\r\n  File \"<stdin>\", line 1, in <module>\r\n  File \"/tmp/uproot5/src/uproot/behaviors/TBranch.py\", line 1818, in array\r\n    _ranges_or_baskets_to_arrays(\r\n  File \"/tmp/uproot5/src/uproot/behaviors/TBranch.py\", line 3124, in _ranges_or_baskets_to_arrays\r\n    uproot.source.futures.delayed_raise(*obj)\r\n  File \"/tmp/uproot5/src/uproot/source/futures.py\", line 36, in delayed_raise\r\n    raise exception_value.with_traceback(traceback)\r\n  File \"/tmp/uproot5/src/uproot/behaviors/TBranch.py\", line 3066, in basket_to_array\r\n    basket_arrays[basket.basket_num] = interpretation.basket_array(\r\n  File \"/tmp/uproot5/src/uproot/interpretation/objects.py\", line 139, in basket_array\r\n    output = self.basket_array_forth(\r\n  File \"/tmp/uproot5/src/uproot/interpretation/objects.py\", line 254, in basket_array_forth\r\n    context[\"forth\"].vm.resume()\r\nValueError: 'read beyond' in AwkwardForth runtime: tried to read beyond the end of an input\r\n```\r\n\r\nUsing `library=\"np\"` or `library=\"pd\"` works, though!",
+        "createdAt":"2023-02-17T13:31:02Z",
+        "number":5010116
+       },
+       {
+        "author":{
+         "login":"jpivarski"
+        },
+        "body":"Thanks for finding this other missing piece; I've added it to the PR.\r\n\r\n`library=\"np\"` and `library=\"pd\"` both bypass the AwkwardForth reading, switching to a much slower (like, 400\u00d7 slower) Python reader. It's possible for you to do that with `library=\"ak\"` by setting\r\n\r\n```python\r\nt[\"your/branch\"].interpretation._forth = False\r\n```\r\n\r\nbefore reading the array. This is not a public interface (see the underscore), so be aware that it's not officially supported\u2014we want to get the AwkwardForth right.\r\n\r\nYou've encountered a case that we couldn't test for because of the range of ROOT formats we have available. It would be great to add your sample to our testing suite, but I know that's not something we can do.\r\n\r\nHow about this, can you print out\r\n\r\n```python\r\nt[\"your/branch\"].debug_array(0).tobytes()\r\n```\r\n\r\nand\r\n\r\n```python\r\nt[\"your/branch\"].typename\r\n```\r\n\r\nso I can try to step through it? I have the `class_code` and the Forth code. I'm a little suspicious of\r\n\r\n```forth\r\n    0 do\r\n    byteoffsets I-> stack\r\n    stream seek\r\n    0 stream skip \r\n6 stream skip\r\n10 stream skip \r\n0 stream skip \r\n6 stream skip\r\n10 stream skip \r\n```\r\n\r\nbecause you have only one `TVector3`, which has a 16 byte header to skip. Maybe the fact that your `SubBranch` is a `TObject` means there's another 4 or 6 bytes to skip, but not 16.\r\n\r\nAnother possibility: could you send me your file by email? I would keep it private.",
+        "createdAt":"2023-02-17T16:20:09Z",
+        "number":5012195
+       },
+       {
+        "author":{
+         "login":"renyhp"
+        },
+        "body":"It might be relevant at this point to mention that this object is a custom one, so `t['TheOnlyBranch/SubBranch'].typename` is just something like `CustomObject*`.\r\n\r\nI think I can provide you with a sample file by email, but it will take a while (maybe next week).",
+        "createdAt":"2023-02-17T16:34:21Z",
+        "number":5012312
+       },
+       {
+        "author":{
+         "login":"jpivarski"
+        },
+        "body":"I know; I expected the `typename` to be `SubBranch` (because that's in the name of the class provided by `class_code`). I just wanted to make sure that it's not inside of an STL container, because that would change my interpretation of the bytes.\r\n\r\nI can wait until next week.\r\n\r\nI've half-convinced myself that the first 16 bytes is the `SubBranch`'s size header + `TObject` header and the next 16 bytes is the `TVector3`'s size header + `TObject` header, so it wouldn't explain why this is running off the end of the data stream.",
+        "createdAt":"2023-02-17T16:39:44Z",
+        "number":5012359
+       },
+       {
+        "author":{
+         "login":"renyhp"
+        },
+        "body":"Writing here too for documentation: I have sent @jpivarski a confidential test file via email.\r\n\r\nAn identical tree with 0 entries fails with a different, more meaningful, error:\r\n\r\n```text\r\nValueError: cannot produce Awkward Arrays for interpretation AsObjects(AsPointer(Model_SubBranch)) because\r\n\r\n    arbitrary pointer\r\n\r\ninstead, try library=\"np\" instead of library=\"ak\" or globally set uproot.default_library\r\n```",
+        "createdAt":"2023-02-20T17:13:19Z",
+        "number":5055884
+       }
+      ],
+      "totalCount":11
+     }
+    },
+    {
+     "author":{
+      "login":"jpivarski"
+     },
+     "body":"Thanks for (privately) sending the file! As you noticed when you sent it to me, empty TTrees fail with\r\n\r\n```\r\nValueError: cannot produce Awkward Arrays for interpretation\r\nAsObjects(AsPointer(Model_SubBranch)) because\r\n\r\n     arbitrary pointer\r\n\r\ninstead, try library=\"np\" instead of library=\"ak\" or globally set\r\nuproot.default_library\r\n```\r\n\r\nand that is the fundamental error. When executed in `library=\"np\"` (arbitrary Python objects in NumPy arrays), it goes through [read_object_any](https://github.com/scikit-hep/uproot5/blob/c24159917ea5732ada3bb0b03615707823194197/src/uproot/deserialization.py#L184-L319), which deserializes a pointer type in C++, which could be a polymorphic class (which could be a union type in Awkward Array _if_ we knew the set of possible types, which we don't) and could have reference cycles (Awkward Arrays are strictly tree-like). The Python code in `library=\"np\"` can handle those dynamic situations, but Awkward Array and AwkwardForth can't.\r\n\r\nThe AwkwardForth code that was generated is not correct because the `read_object_any` function doesn't generate any AwkwardForth code. But then again, there is no AwkwardForth code that would be correct, anyway.\r\n\r\nSo the issue here is just that the above error message didn't happen sooner. The zero-entry TTrees got to the point where this error is shown because they had nothing to deserialize and didn't error-out there. Sorry, but `library=\"np\"` is your only option for this type of data. With PR #838, though, you'd get an error message saying that.\r\n\r\nI'm deleting your file now, so that I don't mistakenly post it publicly in the future.",
+     "createdAt":"2023-02-20T17:21:57Z",
+     "number":5055951,
+     "replies":{
+      "nodes":[],
+      "totalCount":0
+     }
+    }
+   ],
+   "totalCount":2
+  },
+  "createdAt":"2023-02-16T16:07:29Z",
+  "number":826,
+  "title":"Error in untested AwkwardForth case",
+  "url":"https://github.com/scikit-hep/uproot5/discussions/826"
+ },
+ {
+  "author":{
+   "login":"SaharGholipour"
+  },
+  "body":"My root file includes a big data set and it would take forever to convert it to a panda data frame after opening the root file, so I need to remove some of the entries I don't want to have before converting it to a panda data frame. I would appreciate it if you could help me how to remove those entries.",
+  "comments":{
+   "nodes":[
+    {
+     "author":{
+      "login":"Moelf"
+     },
+     "body":"do you have example code of what you're currently doing (that is slow but shows what you're trying to do)? that makes it easier to help you",
+     "createdAt":"2023-02-19T05:36:12Z",
+     "number":5022242,
+     "replies":{
+      "nodes":[
+       {
+        "author":{
+         "login":"SaharGholipour"
+        },
+        "body":"This is how I work with a root file in Python:\r\nimport uproot\r\nfile = uproot.open('file.root')\r\nbranches = file['tree_name'].arrays(library='pd')\r\nSo, basically, my data set will be a table and the columns are my variables (or branches) and the rows are the different entries. then the rest is all in numpy and panda not uproot anymore. Generally, after converting it to a table I use .query to define my cuts and remove the rows I don't want to.\r\nBut now the size of my root file is almost 1GB which can't be converted to the panda data frame, so I need to remove some of my entries to make the data set smaller.\r\nI saw in uproot documentation there's something uproot.iteration(step_size=n) which will take small batches from the data set but I don't know how to define my cuts and at the end having a smaller data set being able to open in panda.",
+        "createdAt":"2023-02-19T05:58:02Z",
+        "number":5022284
+       },
+       {
+        "author":{
+         "login":"Moelf"
+        },
+        "body":"as a side note, 1GB isn't that large, even after decompression it should comfortably sit in your RAM. Do you know what are the branch types? any chance they are not friendly to pandas?\r\n\r\nOne possibility is to not do `library='pd'` first, and use Awkard to obtain a \"mask\", which should be faster, then mask the branches and only then convert to pandas",
+        "createdAt":"2023-02-19T06:27:14Z",
+        "number":5022345
+       },
+       {
+        "author":{
+         "login":"jpivarski"
+        },
+        "body":"1 GB can be large in Pandas. `:)` The syntax for filtering is the same in NumPy, Awkward, and Pandas:\r\n\r\n```python\r\nall_data = file[\"tree_name\"].arrays()\r\nsome_data = all_data[(all_data[\"variable1\"] > 123) & (all_data[\"variable2\"] > 321)]\r\n```\r\n\r\nalthough\r\n\r\n  * NumPy is the fastest and most memory-efficient if the data are purely numerical (i.e. no jagged arrays\u2014no per-particle quantities, only per-event quantities)\r\n  * Awkward is the best suited for jagged arrays, including cuts on both per-event and per-particle quantities\r\n  * Pandas is popular, has the most documentation online, makes plotting and statistical routines easier, but can be slow or a memory hog sometimes.\r\n\r\n@Moelf's suggestion of going through Awkward (or NumPy) first, then converting to Pandas is a good one. You can use the [pd.DataFrame constructor](https://pandas.pydata.org/docs/reference/api/pandas.DataFrame.html), [ak.to_dataframe](https://awkward-array.org/doc/main/reference/generated/ak.to_dataframe.html), [awkward-pandas](https://github.com/intake/awkward-pandas), etc. Uproot's `library=\"pd\"` is not the only way.\r\n\r\nAlso, you can use `entry_start=123`, `entry_stop=321` to reduce how much Uproot _reads_ (as opposed to reading everything into memory and then applying cuts). See [uproot.TTree.arrays](https://uproot.readthedocs.io/en/latest/uproot.behaviors.TTree.TTree.html#arrays). This is essentially what [uproot.TTree.iterate](https://uproot.readthedocs.io/en/latest/uproot.behaviors.TTree.TTree.html#iterate) does in each step (except that that function is a little more efficient in dealing with granularity within the ROOT file and sharing data between steps).\r\n\r\nAlso, also, if you're not going to use all of the TBranches, you can specify a subset to read as the first argument to [uproot.TTree.arrays](https://uproot.readthedocs.io/en/latest/uproot.behaviors.TTree.TTree.html#arrays) and [uproot.TTree.iterate](https://uproot.readthedocs.io/en/latest/uproot.behaviors.TTree.TTree.html#iterate). The `filter_name` argument can take wildcards.",
+        "createdAt":"2023-02-20T15:34:48Z",
+        "number":5054823
+       }
+      ],
+      "totalCount":3
+     }
+    }
+   ],
+   "totalCount":1
+  },
+  "createdAt":"2023-02-19T03:31:42Z",
+  "number":837,
+  "title":"How can I filter the entries of big root file before converting it to a panda data frame?",
+  "url":"https://github.com/scikit-hep/uproot5/discussions/837"
+ },
+ {
+  "author":{
+   "login":"jpivarski"
+  },
+  "body":"## New features\r\n\r\n* feat: allow `uproot.dask` to re-map forms at the data source by @lgray in https://github.com/scikit-hep/uproot5/pull/830\r\n* feat: add support for TLeafG by @ioanaif in https://github.com/scikit-hep/uproot5/pull/840\r\n\r\n## Bug-fixes and performance\r\n\r\n* fix: separate ZstdDecompressor for each thread (re-do) by @nsmith- in https://github.com/scikit-hep/uproot5/pull/828\r\n* fix: `_awkward_forth.symbol_dict` was missing `np.dtype(\">i1\")` by @jpivarski in https://github.com/scikit-hep/uproot5/pull/827\r\n* fix: ak_add_doc should add docs to both the lazy and the materialized array. by @jpivarski in https://github.com/scikit-hep/uproot5/pull/832\r\n* fix: Uproot should be able to run without Awkward. by @jpivarski in https://github.com/scikit-hep/uproot5/pull/831\r\n* fix: add ttree title to __doc__ of top level record by @lgray in https://github.com/scikit-hep/uproot5/pull/836\r\n* fix: complain about CannotBeAwkward earlier, before reading data. by @jpivarski in https://github.com/scikit-hep/uproot5/pull/838\r\n* fix: models should not be wrapped in a ListOffsetForm by @ioanaif in https://github.com/scikit-hep/uproot5/pull/841\r\n* fix: let form mappings apply a behavior by @lgray in https://github.com/scikit-hep/uproot5/pull/834\r\n\r\n## Other\r\n\r\n* docs: add renyhp as a contributor for code by @allcontributors in https://github.com/scikit-hep/uproot5/pull/829\r\n* ci: [pre-commit.ci] pre-commit autoupdate by @pre-commit-ci in https://github.com/scikit-hep/uproot5/pull/839\r\n* chore: move to Ruff by @henryiii in https://github.com/scikit-hep/uproot5/pull/825\r\n\r\n## New Contributors\r\n* @lgray made their first contribution in https://github.com/scikit-hep/uproot5/pull/830\r\n* @ioanaif made their first contribution in https://github.com/scikit-hep/uproot5/pull/841\r\n\r\n**Full Changelog**: https://github.com/scikit-hep/uproot5/compare/v5.0.3...v5.0.4\n\n<hr /><em>This discussion was created from the release <a href='https://github.com/scikit-hep/uproot5/releases/tag/v5.0.4'>Version 5.0.4</a>.</em>",
+  "comments":{
+   "nodes":[],
+   "totalCount":0
+  },
+  "createdAt":"2023-03-01T23:24:48Z",
+  "number":849,
+  "title":"Version 5.0.4",
+  "url":"https://github.com/scikit-hep/uproot5/discussions/849"
+ },
+ {
+  "author":{
+   "login":"aleberti"
+  },
+  "body":"Hi all,\r\n\r\nI have a question which is related to the one I posted in the ROOT forum, see https://root-forum.cern.ch/t/ttime-saved-to-a-ttree-in-root5-and-root6/54031 . So, in short, between ROOT5 and ROOT6, what is written out in ROOT files can be a bit different, in the specific case the `fMilliSec` -private- member of the `TTime` class is not written out in the same way. Therefore, one cannot access easily that member anymore with `uproot` if ROOT6 is used. \r\n\r\nTo give the possibility to test, I attach two ROOT files, one created with ROOT5.34.36 and one with ROOT6.24.08. Here I use a class called `MTime`, which has a `TTime` object as private member of the class.\r\n\r\n[root5_6_examples.zip](https://github.com/scikit-hep/uproot5/files/10978941/root5_6_examples.zip)\r\n\r\nSo when I try reading the `fMilliSec` values (I should get -37390935 and -28750935 respectively for the two events in the files) with `uproot` I get:\r\n\r\n```bash\r\nIn [1]: import uproot\r\n\r\nIn [2]: uproot.__version__\r\nOut[2]: '4.3.7'\r\n\r\nIn [3]: rootf5 = uproot.open(\"example_root5.root\")\r\n\r\nIn [4]: rootf5[\"Events\"][\"MTime/fTime/fTime.fMilliSec\"].array(library=\"np\")\r\nOut[4]: array([-37390935, -28750935])\r\n\r\nIn [5]: rootf6 = uproot.open(\"example_root6.root\")\r\n\r\nIn [6]: rootf6[\"Events\"].keys()\r\nOut[6]:\r\n['MTime',\r\n 'MTime/MParContainer',\r\n 'MTime/MParContainer/TObject',\r\n 'MTime/MParContainer/TObject/fUniqueID',\r\n 'MTime/MParContainer/TObject/fBits',\r\n 'MTime/fMjd',\r\n 'MTime/fTime',\r\n 'MTime/fNanoSec']\r\n\r\nIn [7]: rootf5[\"Events\"][\"MTime/fTime\"].array(library=\"np\")\r\nOut[7]: {'fTime.fMilliSec': array([-37390935, -28750935])}\r\n\r\nIn [8]: rootf6[\"Events\"][\"MTime/fTime\"].array(library=\"np\")\r\n---------------------------------------------------------------------------\r\nValueError                                Traceback (most recent call last)\r\n~/Software/miniconda3/envs/magic-cta-pipe-analysis-school-2023/lib/python3.8/site-packages/uproot/interpretation/numerical.py in basket_array(self, data, byte_offsets, basket, branch, context, cursor_offset, library)\r\n    341         try:\r\n--> 342             output = data.view(dtype).reshape((-1,) + shape)\r\n    343         except ValueError as err:\r\n\r\nValueError: When changing to a larger dtype, its size must be a divisor of the total size in bytes of the last axis of the array.\r\n\r\nThe above exception was the direct cause of the following exception:\r\n\r\nValueError                                Traceback (most recent call last)\r\n<ipython-input-9-6aec0c18a45a> in <cell line: 1>()\r\n----> 1 rootf6[\"Events\"][\"MTime/fTime\"].array(library=\"np\")\r\n\r\n~/Software/miniconda3/envs/magic-cta-pipe-analysis-school-2023/lib/python3.8/site-packages/uproot/behaviors/TBranch.py in array(self, interpretation, entry_start, entry_stop, decompression_executor, interpretation_executor, array_cache, library)\r\n   2206                         ranges_or_baskets.append((branch, basket_num, range_or_basket))\r\n   2207\r\n-> 2208         _ranges_or_baskets_to_arrays(\r\n   2209             self,\r\n   2210             ranges_or_baskets,\r\n\r\n~/Software/miniconda3/envs/magic-cta-pipe-analysis-school-2023/lib/python3.8/site-packages/uproot/behaviors/TBranch.py in _ranges_or_baskets_to_arrays(hasbranches, ranges_or_baskets, branchid_interpretation, entry_start, entry_stop, decompression_executor, interpretation_executor, library, arrays, update_ranges_or_baskets)\r\n   3491\r\n   3492         elif isinstance(obj, tuple) and len(obj) == 3:\r\n-> 3493             uproot.source.futures.delayed_raise(*obj)\r\n   3494\r\n   3495         else:\r\n\r\n~/Software/miniconda3/envs/magic-cta-pipe-analysis-school-2023/lib/python3.8/site-packages/uproot/source/futures.py in delayed_raise(exception_class, exception_value, traceback)\r\n     34     Raise an exception from a background thread on the main thread.\r\n     35     \"\"\"\r\n---> 36     raise exception_value.with_traceback(traceback)\r\n     37\r\n     38\r\n\r\n~/Software/miniconda3/envs/magic-cta-pipe-analysis-school-2023/lib/python3.8/site-packages/uproot/behaviors/TBranch.py in basket_to_array(basket)\r\n   3435             basket_arrays = branchid_arrays[branch.cache_key]\r\n   3436\r\n-> 3437             basket_arrays[basket.basket_num] = interpretation.basket_array(\r\n   3438                 basket.data,\r\n   3439                 basket.byte_offsets,\r\n\r\n~/Software/miniconda3/envs/magic-cta-pipe-analysis-school-2023/lib/python3.8/site-packages/uproot/interpretation/numerical.py in basket_array(self, data, byte_offsets, basket, branch, context, cursor_offset, library)\r\n    342             output = data.view(dtype).reshape((-1,) + shape)\r\n    343         except ValueError as err:\r\n--> 344             raise ValueError(\r\n    345                 \"\"\"basket {} in tree/branch {} has the wrong number of bytes ({}) \"\"\"\r\n    346                 \"\"\"for interpretation {}\r\n\r\nValueError: basket 0 in tree/branch /Events;1:MTime/fTime has the wrong number of bytes (28) for interpretation AsStridedObjects(Model_TTime_v2)\r\nin file example_root6.root\r\n```\r\n\r\nIn the `TTime` class docs (https://root.cern/doc/master/TTime_8h_source.html#l00076), I see that in principle one can get the `fMilliSec` value by using the `long long` operator. Is there a way to do something similar using `uproot`?\r\n\r\nThanks in advance!\r\n\r\n\r\n",
+  "comments":{
+   "nodes":[
+    {
+     "author":{
+      "login":"jpivarski"
+     },
+     "body":"Yes, the structures in the two files are different, but it might be just that the ROOT 5 one was written with full splitting (`splitLevel=99`) and the ROOT 6 one was written without splitting (`splitLevel=0`).\r\n\r\n```python\r\n>>> import uproot\r\n>>> f5 = uproot.open(\"example_root5.root\")\r\n>>> f6 = uproot.open(\"example_root6.root\")\r\n\r\n>>> f5[\"Events/MTime/fTime\"].show()\r\nname                 | typename                 | interpretation                \r\n---------------------+--------------------------+-------------------------------\r\nfTime                | TTime                    | AsGroup(<TBranchElement 'fTime\r\nfTime.fMilliSec      | int64_t                  | AsDtype('>i8')\r\n\r\n>>> f6[\"Events/MTime/fTime\"].show()\r\nname                 | typename                 | interpretation                \r\n---------------------+--------------------------+-------------------------------\r\nfTime                | TTime                    | AsStridedObjects(Model_TTime_v\r\n```\r\n\r\nThe `f5` one has an `fTime` TBranch with a subbranch named `fTime.fMilliSec` (64-bit integers) and the `f6` one only has an `fTime` TBranch whose type is the whole struct.\r\n\r\nThe struct doesn't contain anything other than that 64-bit integer (`long long`).\r\n\r\n```python\r\n>>> f6.file.streamer_named(\"TTime\").show()\r\nTTime (v2)\r\n    fMilliSec: long long (TStreamerBasicType)\r\n```\r\n\r\nWhen we look at the raw bytes of the first entry in `f6`,\r\n\r\n```python\r\n>>> f6[\"Events/MTime/fTime\"].debug_array(0)\r\narray([ 64,   0,   0,  10,   0,   2, 255, 255, 255, 255, 253, 197, 117,\r\n       169], dtype=uint8)\r\n```\r\n\r\nwe see the correct value\r\n\r\n```python\r\n>>> import numpy as np\r\n>>> np.array([255, 255, 255, 255, 253, 197, 117, 169], \"u1\").view(\">i8\")\r\narray([-37390935])\r\n```\r\n\r\npreceded by 6 extra bytes. This is a header for the `TTime` struct. In the first 4 bytes, `64` is a high bit saying that `10` is the size of the object (which is true) and in the next 2 bytes, `2` is the class version of this `TTime`.\r\n\r\nWhen Uproot tried to come up with an `Interpretation` for this data, it should have included `(\"@num_bytes\", \">u4\"), (\"@instance_version\", \">u2\")` in the NumPy dtype. It's missing these headers:\r\n\r\n```python\r\n>>> f6[\"Events/MTime/fTime\"].interpretation.from_dtype\r\ndtype([('fMilliSec', '>i8')])\r\n```\r\n\r\nThe interpretation ought to be\r\n\r\n```python\r\n>>> interp = uproot.AsDtype([(\"@num_bytes\", \">u4\"), (\"@instance_version\", \">u2\"), ('fMilliSec', '>i8')])\r\n\r\n>>> f6[\"Events/MTime/fTime\"].array(interp, library=\"np\")\r\narray([(1073741834, 2, -37390935), (1073741834, 2, -28750935)],\r\n      dtype=[('@num_bytes', '<u4'), ('@instance_version', '<u2'), ('fMilliSec', '<i8')])\r\n```\r\n\r\nfrom which you can pull out the `fMilliSec`.\r\n\r\n```python\r\n>>> f6[\"Events/MTime/fTime\"].array(interp, library=\"np\")[\"fMilliSec\"]\r\narray([-37390935, -28750935])\r\n```\r\n\r\nIt's always been difficult to figure out the right `Interpretation` for a TBranch, particularly with including or not including these headers. Some TBranches have headers at all levels, some have them at some levels, and some don't have them at all, and it's unclear (to me) where that information can be found.\r\n\r\nWe could convert this into a bug report (the `uproot.interpretation.identify.interpretation_of` function decided that this one has no headers when it actually does have headers) in the hope that someone will be able to think of a way to determine this information once and for all.\r\n\r\nIn the meantime, though, you can pass the `interp` above into the [TBranch.array](https://uproot.readthedocs.io/en/latest/uproot.behaviors.TBranch.TBranch.html#array) method manually to get what you want.",
+     "createdAt":"2023-03-15T16:59:40Z",
+     "number":5324591,
+     "replies":{
+      "nodes":[
+       {
+        "author":{
+         "login":"aleberti"
+        },
+        "body":"Thank you @jpivarski ! Regarding the split level, these files were created by me, so the same split level was used for both.\r\n\r\nRegarding the (temporary) solution i.e. using the interpretation you provided, it should be fine for my purposes.\r\n\r\nFor the bug report, should I do it or do you take care? I guess mine is just a specific case of a more general problem.\r\n\r\nAlso, maybe you can also take another look at the conversation in the ROOT forum (https://root-forum.cern.ch/t/ttime-saved-to-a-ttree-in-root5-and-root6/54031/4). It seems that I stumbled upon a bug which may affect other classes in ROOT.",
+        "createdAt":"2023-03-15T17:57:24Z",
+        "number":5325233
+       },
+       {
+        "author":{
+         "login":"jpivarski"
+        },
+        "body":"I just read the discussion in the ROOT Forum, and I understand now that this class diverges from the normal pattern by being an old class dictionary. So `interpretation_of` couldn't be expected to discover that the header is needed. In that case, we can handle it as a special case; the same is true of other old classes. Issue #861 is a reminder to do that.\r\n\r\nThere is a more general problem: `Interpretations` with missing or extra headers are common reasons for not being able to read a TBranch (without a manual `Interpretation`). It seems that this is not one of those examples... or maybe the reason this is a recurring problem is because there are a lot of \"old\" classes? If so, then maybe issue #861 is not the best solution, as it would lead to a lot of duplicated code; maybe we need a list of classes that have headers, despite the general rule that new-style classes do not...",
+        "createdAt":"2023-03-15T18:17:27Z",
+        "number":5325438
+       }
+      ],
+      "totalCount":2
+     }
+    }
+   ],
+   "totalCount":1
+  },
+  "createdAt":"2023-03-15T11:13:26Z",
+  "number":859,
+  "title":"Getting information from TTime fMilliSec member",
+  "url":"https://github.com/scikit-hep/uproot5/discussions/859"
+ },
+ {
+  "author":{
+   "login":"jpivarski"
+  },
+  "body":"## New features\r\n\r\n_(none!)_\r\n\r\n## Bug-fixes and performance\r\n\r\n* fix: test 0814 name by @ioanaif in https://github.com/scikit-hep/uproot5/pull/845\r\n* fix: update licence url for tests by @ioanaif in https://github.com/scikit-hep/uproot5/pull/846\r\n* fix: replaced incorrect AwkwardForth `var_set` logic with a check to see if the Form is complete by @jpivarski in https://github.com/scikit-hep/uproot5/pull/851\r\n* fix: unable to delete hist from ROOT file by @ioanaif in https://github.com/scikit-hep/uproot5/pull/844\r\n* fix: AwkwardForth was nesting the same ListOffsetArray (same node name) multiple times by @jpivarski in https://github.com/scikit-hep/uproot5/pull/855\r\n\r\n## Other\r\n\r\n* ci: [pre-commit.ci] pre-commit autoupdate by @pre-commit-ci in https://github.com/scikit-hep/uproot5/pull/842\r\n* chore: don't repeat awkward dependency by @agoose77 in https://github.com/scikit-hep/uproot5/pull/843\r\n* chore(deps): bump pypa/gh-action-pypi-publish from 1.6.4 to 1.7.1 by @dependabot in https://github.com/scikit-hep/uproot5/pull/856\r\n\r\n**Full Changelog**: https://github.com/scikit-hep/uproot5/compare/v5.0.4...v5.0.5\n\n<hr /><em>This discussion was created from the release <a href='https://github.com/scikit-hep/uproot5/releases/tag/v5.0.5'>Version 5.0.5</a>.</em>",
+  "comments":{
+   "nodes":[],
+   "totalCount":0
+  },
+  "createdAt":"2023-03-16T21:27:05Z",
+  "number":863,
+  "title":"Version 5.0.5",
+  "url":"https://github.com/scikit-hep/uproot5/discussions/863"
+ },
+ {
+  "author":{
+   "login":"jpivarski"
+  },
+  "body":"## New features\r\n\r\n* feat: add pyodide support for jupyter-lite for files opened via HTTP  by @ioanaif in https://github.com/scikit-hep/uproot5/pull/868\r\n* feat: add support for pandas is_numeric API change by @ioanaif in https://github.com/scikit-hep/uproot5/pull/871\r\n* feat: have unknown type become float64 when in array context by @ioanaif in https://github.com/scikit-hep/uproot5/pull/870\r\n\r\n## Bug-fixes and performance\r\n\r\n* fix: strided interpretation for data with extra offsets by @ioanaif in https://github.com/scikit-hep/uproot5/pull/852\r\n\r\n## Other\r\n\r\n* ci: [pre-commit.ci] pre-commit autoupdate by @pre-commit-ci in https://github.com/scikit-hep/uproot5/pull/865\r\n* ci: [pre-commit.ci] pre-commit autoupdate by @pre-commit-ci in https://github.com/scikit-hep/uproot5/pull/867\r\n* chore(deps): bump pypa/gh-action-pypi-publish from 1.7.1 to 1.8.1 by @dependabot in https://github.com/scikit-hep/uproot5/pull/864\r\n* chore(deps): bump pypa/gh-action-pypi-publish from 1.8.1 to 1.8.4 by @dependabot in https://github.com/scikit-hep/uproot5/pull/869\r\n\r\n**Full Changelog**: https://github.com/scikit-hep/uproot5/compare/v5.0.5...v5.0.6\n\n<hr /><em>This discussion was created from the release <a href='https://github.com/scikit-hep/uproot5/releases/tag/v5.0.6'>Version 5.0.6</a>.</em>",
+  "comments":{
+   "nodes":[],
+   "totalCount":0
+  },
+  "createdAt":"2023-04-06T17:01:37Z",
+  "number":872,
+  "title":"Version 5.0.6",
+  "url":"https://github.com/scikit-hep/uproot5/discussions/872"
+ },
+ {
+  "author":{
+   "login":"jpivarski"
+  },
+  "body":"**Note:** This release introduces a slight change in behavior. Previously, `uproot.dask` would default to `step_size=\"100 MB\"` if `open_files=True` and whole-file-steps (limit on step size) if `open_files=False`. Now both `open_files` cases default to `steps_per_file=1` (whole-file-steps) for uniformity. If you have been using `uproot.dask` and this version suddenly gives you large Dask partitions, use either `step_size` or `steps_per_file` to control your partition size (`step_size=\"100 MB\"` is the old behavior).\r\n\r\n## New features\r\n\r\n* feat: add in capability for blindly splitting files into chunks for dask by @lgray in https://github.com/scikit-hep/uproot5/pull/876\r\n\r\n## Bug-fixes and performance\r\n\r\n_(none!)_\r\n\r\n## Other\r\n\r\n* ci: [pre-commit.ci] pre-commit autoupdate by @pre-commit-ci in https://github.com/scikit-hep/uproot5/pull/874\r\n* chore(deps): bump pypa/gh-action-pypi-publish from 1.8.4 to 1.8.5 by @dependabot in https://github.com/scikit-hep/uproot5/pull/873\r\n\r\n**Full Changelog**: https://github.com/scikit-hep/uproot5/compare/v5.0.6...v5.0.7\n\n<hr /><em>This discussion was created from the release <a href='https://github.com/scikit-hep/uproot5/releases/tag/v5.0.7'>Version 5.0.7</a>.</em>",
+  "comments":{
+   "nodes":[],
+   "totalCount":0
+  },
+  "createdAt":"2023-04-14T15:24:41Z",
+  "number":877,
+  "title":"Version 5.0.7",
+  "url":"https://github.com/scikit-hep/uproot5/discussions/877"
+ },
+ {
+  "author":{
+   "login":"mattiasoldani"
+  },
+  "body":"Howdy!\r\n\r\nI'm using uproot 4.3.7 to open a ROOT file (of which a sample is attached: [TEST230417_LOCAL_SMALL.zip](https://github.com/scikit-hep/uproot5/files/11249405/TEST230417_LOCAL_SMALL.zip)) and access a tree (\"Z\") that is inside it. One of the branches of this tree, \"Cluster[6]\", should be an array of 6 custom zCluster objects for each event. Each zCluster object includes several members, mostly float and TVector3 entries. I checked with ROOT and all the branch dimensions are as expected, as seen in the TBrowser screenshots below: the tree contains 116 events, whereas all the Cluster[6] numerical subbranches contain 116*6 = 696 entries.\r\n\r\n![Z_Event_iEv](https://user-images.githubusercontent.com/62517661/232466982-a2d77f83-1c39-4ffc-a9e6-be7737ed16e1.jpg)\r\n![Z_Event_Cluster_nHits](https://user-images.githubusercontent.com/62517661/232466977-79dfddea-fc19-4205-aaf6-ebdcabb56498.jpg)\r\n\r\nIf I try to open the same file in uproot via\r\n```\r\nfile = uproot.open(\"TEST230417_LOCAL_SMALL.root\")\r\ntree = file[\"Z\"]\r\n```\r\nI get the correct tree, i.e. `tree.num_entries` outputs 116 and `tree.show()` outputs\r\n```\r\nname                 | typename                 | interpretation                \r\n---------------------+--------------------------+-------------------------------\r\nEvent                | zEvent                   | AsGroup(<TBranchElement 'Ev...\r\nEvent/TObject        | (group of fUniqueID:u... | AsGroup(<TBranchElement 'TO...\r\nEvent/TObject/fUn... | uint32_t                 | AsDtype('>u4')\r\nEvent/TObject/fBits  | uint32_t                 | AsDtype('>u4')\r\nEvent/iEv            | int32_t                  | AsDtype('>i4')\r\nEvent/W              | double                   | AsDtype('>f8')\r\nEvent/pK             | TLorentzVector           | AsStridedObjects(Model_TLor...\r\nEvent/xK             | TVector3                 | AsStridedObjects(Model_TVec...\r\nEvent/iPair          | int32_t                  | AsDtype('>i4')\r\nEvent/ig[6]          | int32_t[6]               | AsDtype(\"('>i4', (6,))\")\r\nEvent/igClus[6]      | int32_t[6]               | AsDtype(\"('>i4', (6,))\")\r\nEvent/pg[6]          | TLorentzVector           | AsStridedObjects(Model_TLor...\r\nEvent/Hit[6]         | zHit                     | AsStridedObjects(Model_zHit...\r\nEvent/nCluster       | int32_t                  | AsDtype('>i4')\r\nEvent/Cluster[6]     | zCluster                 | AsObjects(Model_zCluster)\r\nEvent/Vertex         | zVertex                  | AsGroup(<TBranchElement 'Ve...\r\nEvent/Vertex/Vert... | int32_t                  | AsDtype('>i4')\r\nEvent/Vertex/Vert... | int32_t[2]               | AsDtype(\"('>i4', (2,))\")\r\nEvent/Vertex/Vert... | int32_t                  | AsDtype('>i4')\r\nEvent/Vertex/Vert... | TVector3                 | AsStridedObjects(Model_TVec...\r\nEvent/Vertex/Vert... | TLorentzVector           | AsStridedObjects(Model_TLor...\r\nEvent/Vertex/Vert... | TVector3                 | AsStridedObjects(Model_TVec...\r\nEvent/Vertex/Vert... | TLorentzVector           | AsStridedObjects(Model_TLor...\r\nEvent/Vertex/Vert... | int32_t                  | AsDtype('>i4')\r\n```\r\n\r\nHowever, `tree.arrays([\"Event/Cluster[6]\"])` raises a `CannotBeAwkward: classes that can contain members of the same type cannot be Awkward Arrays because the depth of instances is unbounded` error and `tree.arrays([\"Event/Cluster[6]\"], library=\"np\")` outputs a dictionary of 116 entries whose values are single zCluster objects, i.e. one single zCluster per event. Accessing any of them via e.g. `tree[\"Event/Cluster[6]\"].arrays(library=\"np\")[\"Cluster[6]\"][0].all_members` seems to correctly output all the information regarding one single cluster, i.e.\r\n```\r\n{'Status': 1,\r\n 'Bin': 3,\r\n 'iSubdet': 0,\r\n 'Detected': 0,\r\n 'Primary': 0,\r\n 'Used': 0,\r\n 'Charge': 1,\r\n 'Eff': 1.0,\r\n 'xTrue': <TVector3 (version 3) at 0x7feb5830dc40>,\r\n 'xRec': <TVector3 (version 3) at 0x7feb58314280>,\r\n 'PosRes': 0.015788506169338613,\r\n 'xTrue1': <TVector3 (version 3) at 0x7feb58314190>,\r\n 'xTrue2': <TVector3 (version 3) at 0x7feb58314040>,\r\n 'xPre1': <TVector3 (version 3) at 0x7feb58314490>,\r\n 'xPre2': <TVector3 (version 3) at 0x7feb583145b0>,\r\n 'PreRes': 0.06397004001907128,\r\n 'ETrue': 0.07086701659225284,\r\n 'ERec': 0.03220946465343243,\r\n 'ERes': 0.09040274561889668,\r\n 'Converted': 1,\r\n 'dXdZTrue': 0.13310240197699721,\r\n 'dYdZTrue': -0.34894589067080145,\r\n 'nHits': 1,\r\n 'HitList': array([0, 1, 1, 1, 1, 1], dtype=int32),\r\n 'nConverted': 0}\r\n```\r\nbut where are the other 5 clusters? Am I missing something trivial?\r\n\r\nThank you very much!\r\n\r\n",
+  "comments":{
+   "nodes":[],
+   "totalCount":0
+  },
+  "createdAt":"2023-04-17T11:10:11Z",
+  "number":879,
+  "title":"Troubles opening a tree with a custom-class branch",
+  "url":"https://github.com/scikit-hep/uproot5/discussions/879"
+ },
+ {
+  "author":{
+   "login":"jpivarski"
+  },
+  "body":"## New features\r\n\r\n* feat: chunk specification in uproot.dask by @lgray in https://github.com/scikit-hep/uproot5/pull/898\r\n\r\n## Bug fixes and performance\r\n\r\n* fix: histograms from Geant4 by @henryiii in https://github.com/scikit-hep/uproot5/pull/884\r\n* fix: bugs caught by a Ruff update by @pre-commit-ci in https://github.com/scikit-hep/uproot5/pull/882\r\n* fix: adapt to scikit-hep/awkward#2437. by @jpivarski in https://github.com/scikit-hep/uproot5/pull/892\r\n* fix: awkward_form breadcrumbs class issue 880 by @ioanaif in https://github.com/scikit-hep/uproot5/pull/886\r\n\r\n## Other\r\n\r\n* chore: update pre-commit hooks by @pre-commit-ci in https://github.com/scikit-hep/uproot5/pull/889\r\n* chore(deps): bump pypa/gh-action-pypi-publish from 1.8.5 to release/v1 by @dependabot in https://github.com/scikit-hep/uproot5/pull/887\r\n* chore: update pre-commit hooks by @pre-commit-ci in https://github.com/scikit-hep/uproot5/pull/893\r\n\r\n**Full Changelog**: https://github.com/scikit-hep/uproot5/compare/v5.0.7...v5.0.8\n\n<hr /><em>This discussion was created from the release <a href='https://github.com/scikit-hep/uproot5/releases/tag/v5.0.8'>Version 5.0.8</a>.</em>",
+  "comments":{
+   "nodes":[],
+   "totalCount":0
+  },
+  "createdAt":"2023-06-09T13:28:16Z",
+  "number":899,
+  "title":"Version 5.0.8",
+  "url":"https://github.com/scikit-hep/uproot5/discussions/899"
+ },
+ {
+  "author":{
+   "login":"jpivarski"
+  },
+  "body":"This is such a common request that there ought to be a simple function that just copies TBranches. (Does anyone have time to write such a function?) Meanwhile, this is a rough guide.\r\n\r\nIf you just try to read from Uproot into an Awkward Array and write that same Awkward Array back, it doesn't work:\r\n\r\n```python\r\n>>> import skhep_testdata\r\n>>> import uproot\r\n>>> tree = uproot.open(skhep_testdata(\"uproot-HZZ.root\").data_path())[\"events\"]\r\n>>> arrays = tree.arrays(filter_name=[\"Jet_*\", \"Muon_*\"])\r\n>>> arrays\r\n<Array [{Jet_Px: [], Jet_Py: [], ...}, ...] type='2421 * {Jet_Px: var * flo...'>\r\n>>> arrays.type.show()\r\n2421 * {\r\n    Jet_Px: var * float32,\r\n    Jet_Py: var * float32,\r\n    Jet_Pz: var * float32,\r\n    Jet_E: var * float32,\r\n    Jet_btag: var * float32,\r\n    Jet_ID: var * bool,\r\n    Muon_Px: var * float32,\r\n    Muon_Py: var * float32,\r\n    Muon_Pz: var * float32,\r\n    Muon_E: var * float32,\r\n    Muon_Charge: var * int32,\r\n    Muon_Iso: var * float32\r\n}\r\n```\r\n\r\nand now writing:\r\n\r\n```python\r\n>>> outfile = uproot.recreate(\"/tmp/out.root\")\r\n>>> outfile[\"tree\"] = arrays\r\nTraceback (most recent call last):\r\n  File \"<stdin>\", line 1, in <module>\r\n  File \"/home/jpivarski/irishep/uproot5/src/uproot/writing/writable.py\", line 973, in __setitem__\r\n    self.update({where: what})\r\n  File \"/home/jpivarski/irishep/uproot5/src/uproot/writing/writable.py\", line 1546, in update\r\n    uproot.writing.identify.add_to_directory(v, name, directory, streamers)\r\n  File \"/home/jpivarski/irishep/uproot5/src/uproot/writing/identify.py\", line 151, in add_to_directory\r\n    tree = directory.mktree(name, metadata)\r\n  File \"/home/jpivarski/irishep/uproot5/src/uproot/writing/writable.py\", line 1297, in mktree\r\n    directory._cascading.add_tree(\r\n  File \"/home/jpivarski/irishep/uproot5/src/uproot/writing/_cascade.py\", line 1788, in add_tree\r\n    tree = uproot.writing._cascadetree.Tree(\r\n  File \"/home/jpivarski/irishep/uproot5/src/uproot/writing/_cascadetree.py\", line 284, in __init__\r\n    raise TypeError(\r\nTypeError: fields of a record must be NumPy types, though the record itself may be in a jagged array\r\n\r\n    field 'Jet_Px' has type var * float32\r\n```\r\n\r\nIt was a giant usability oversight for me to not realize that someone might want to write the same array they just read, _without_ modification.\r\n\r\nThe error here is because the output-writer (assigning to `outfile[\"tree\"]`) is expecting a `dict`, and `arrays` is an `ak.Array`.\r\n\r\nOkay, we can make a `dict`. We can get all of the record field names (e.g. `\"Jet_Px\"`) with [ak.fields](https://awkward-array.org/doc/main/reference/generated/ak.fields.html) and all of the field values (e.g. the array corresponding to jet $p_T$) with [ak.unzip](https://awkward-array.org/doc/main/reference/generated/ak.unzip.html).\r\n\r\nThis is able to write...\r\n\r\n```python\r\n>>> outfile[\"tree\"] = dict(zip(ak.fields(arrays), ak.unzip(arrays)))\r\n```\r\n\r\n...but it's probably not what you want.\r\n\r\n```python\r\n>>> outfile[\"tree\"].show()\r\nname                 | typename                 | interpretation                \r\n---------------------+--------------------------+-------------------------------\r\nnJet_Px              | int32_t                  | AsDtype('>i4')\r\nJet_Px               | float[]                  | AsJagged(AsDtype('>f4'))\r\nnJet_Py              | int32_t                  | AsDtype('>i4')\r\nJet_Py               | float[]                  | AsJagged(AsDtype('>f4'))\r\nnJet_Pz              | int32_t                  | AsDtype('>i4')\r\nJet_Pz               | float[]                  | AsJagged(AsDtype('>f4'))\r\nnJet_E               | int32_t                  | AsDtype('>i4')\r\nJet_E                | float[]                  | AsJagged(AsDtype('>f4'))\r\nnJet_btag            | int32_t                  | AsDtype('>i4')\r\nJet_btag             | float[]                  | AsJagged(AsDtype('>f4'))\r\nnJet_ID              | int32_t                  | AsDtype('>i4')\r\nJet_ID               | bool[]                   | AsJagged(AsDtype('bool'))\r\nnMuon_Px             | int32_t                  | AsDtype('>i4')\r\nMuon_Px              | float[]                  | AsJagged(AsDtype('>f4'))\r\nnMuon_Py             | int32_t                  | AsDtype('>i4')\r\nMuon_Py              | float[]                  | AsJagged(AsDtype('>f4'))\r\nnMuon_Pz             | int32_t                  | AsDtype('>i4')\r\nMuon_Pz              | float[]                  | AsJagged(AsDtype('>f4'))\r\nnMuon_E              | int32_t                  | AsDtype('>i4')\r\nMuon_E               | float[]                  | AsJagged(AsDtype('>f4'))\r\nnMuon_Charge         | int32_t                  | AsDtype('>i4')\r\nMuon_Charge          | int32_t[]                | AsJagged(AsDtype('>i4'))\r\nnMuon_Iso            | int32_t                  | AsDtype('>i4')\r\nMuon_Iso             | float[]                  | AsJagged(AsDtype('>f4'))\r\n```\r\n\r\nIt's because the Awkward Array doesn't know that all jet attributes have the same number of values per event and all muon attributes have the same number of values per event, and so Uproot has to make a separate counter for each.\r\n\r\nYou can inform Uproot that these arrays should share counters by putting them into the same records:\r\n\r\n```python\r\n>>> jets = ak.zip({name[4:]: array for name, array in zip(ak.fields(arrays), ak.unzip(arrays)) if name.startswith(\"Jet_\")})\r\n>>> jets.type.show()\r\n2421 * var * {\r\n    Px: float32,\r\n    Py: float32,\r\n    Pz: float32,\r\n    E: float32,\r\n    btag: float32,\r\n    ID: bool\r\n}\r\n>>> muons = ak.zip({name[5:]: array for name, array in zip(ak.fields(arrays), ak.unzip(arrays)) if name.startswith(\"Muon_\")})\r\n>>> muons.type.show()\r\n2421 * var * {\r\n    Px: float32,\r\n    Py: float32,\r\n    Pz: float32,\r\n    E: float32,\r\n    Charge: int32,\r\n    Iso: float32\r\n}\r\n```\r\n\r\n(If they were not compatible, the [ak.zip](https://awkward-array.org/doc/main/reference/generated/ak.zip.html) would fail.) The important thing now is that the `var` is outside the record in the type descriptor: all of these attributes have the _same_ raggedness (and different between jets and muons).\r\n\r\nNow Uproot has enough information to make only one counter for each particle type.\r\n\r\n```python\r\n>>> outfile[\"tree\"] = {\"Jet\": jets, \"Muon\": muons}\r\n>>> outfile[\"tree\"].show()\r\nname                 | typename                 | interpretation                \r\n---------------------+--------------------------+-------------------------------\r\nnJet                 | int32_t                  | AsDtype('>i4')\r\nJet_Px               | float[]                  | AsJagged(AsDtype('>f4'))\r\nJet_Py               | float[]                  | AsJagged(AsDtype('>f4'))\r\nJet_Pz               | float[]                  | AsJagged(AsDtype('>f4'))\r\nJet_E                | float[]                  | AsJagged(AsDtype('>f4'))\r\nJet_btag             | float[]                  | AsJagged(AsDtype('>f4'))\r\nJet_ID               | bool[]                   | AsJagged(AsDtype('bool'))\r\nnMuon                | int32_t                  | AsDtype('>i4')\r\nMuon_Px              | float[]                  | AsJagged(AsDtype('>f4'))\r\nMuon_Py              | float[]                  | AsJagged(AsDtype('>f4'))\r\nMuon_Pz              | float[]                  | AsJagged(AsDtype('>f4'))\r\nMuon_E               | float[]                  | AsJagged(AsDtype('>f4'))\r\nMuon_Charge          | int32_t[]                | AsJagged(AsDtype('>i4'))\r\nMuon_Iso             | float[]                  | AsJagged(AsDtype('>f4'))\r\n```\r\n\r\nand that's probably what you want.\r\n\r\n",
+  "comments":{
+   "nodes":[],
+   "totalCount":0
+  },
+  "createdAt":"2023-06-13T21:01:01Z",
+  "number":903,
+  "title":"How to copy form one ROOT file to another (assuming NanoAOD-like structure)",
+  "url":"https://github.com/scikit-hep/uproot5/discussions/903"
+ },
+ {
+  "author":{
+   "login":"jpivarski"
+  },
+  "body":"## New features\r\n\r\n_(none!)_\r\n\r\n## Bug fixes and performance\r\n\r\n* fix: if using form remapping start off with full list of remapped columns by @lgray in https://github.com/scikit-hep/uproot5/pull/905\r\n\r\n## Other\r\n\r\n**Full Changelog**: https://github.com/scikit-hep/uproot5/compare/v5.0.8...v5.0.9\n\n<hr /><em>This discussion was created from the release <a href='https://github.com/scikit-hep/uproot5/releases/tag/v5.0.9'>Version 5.0.9</a>.</em>",
+  "comments":{
+   "nodes":[],
+   "totalCount":0
+  },
+  "createdAt":"2023-06-21T01:02:11Z",
+  "number":907,
+  "title":"Version 5.0.9",
+  "url":"https://github.com/scikit-hep/uproot5/discussions/907"
+ },
+ {
+  "author":{
+   "login":"jpivarski"
+  },
+  "body":"From a [Google Group message](https://groups.google.com/g/uproot-users/c/7W2jUrkxXpc),\r\n\r\n> Dear uproot users,\r\n> \r\n> I am trying to save a numpy histogram in a root file but I want to set th ebin error as zero. Is there a way I can do this ?\r\n> \r\n> Thanks in advance!\r\n> \r\n> Regards,\r\n> Nilima.",
+  "comments":{
+   "nodes":[
+    {
+     "author":{
+      "login":"jpivarski"
+     },
+     "body":"NumPy histograms (which aren't even instances of some class\u2014they're just a 2-tuple of bin edges and bin contents) don't have errors. They either set the ROOT fSumw2 to nullptr or make the variances equal to the values (i.e. assuming Poisson statistics). So there isn't a handle for assigning their errors.\r\n\r\nTo control their errors, you should use a histogram class that has errors, such as boost-histogram or hist with the [Weight storage](https://hist.readthedocs.io/en/latest/user-guide/storages.html#weight). You can use the bin edges and bin contents from NumPy to construct the boost-histogram or hist object. NumPy's bin edges are a [Variable axis](https://hist.readthedocs.io/en/latest/user-guide/axes.html#variable-axis), although if you know that they are [Regular](https://hist.readthedocs.io/en/latest/user-guide/axes.html#regular-axis), you can specify the binning as such. You can assign the bin contents with [values() and variances()](https://hist.readthedocs.io/en/latest/user-guide/quickstart.html#accessing-the-contents), which can be changed in-place. Then the boost-histogram or hist object can be assigned into the output file in the same way that a NumPy 2-tuple can. See the [blue box and following here](https://uproot.readthedocs.io/en/latest/basic.html#writing-objects-to-a-file).",
+     "createdAt":"2023-06-21T15:28:48Z",
+     "number":6243321,
+     "replies":{
+      "nodes":[],
+      "totalCount":0
+     }
+    }
+   ],
+   "totalCount":1
+  },
+  "createdAt":"2023-06-21T15:28:04Z",
+  "number":909,
+  "title":"SetBinError functionality",
+  "url":"https://github.com/scikit-hep/uproot5/discussions/909"
+ },
+ {
+  "author":{
+   "login":"jpivarski"
+  },
+  "body":"## New features\r\n\r\n* feat: add `unproject_layout` support by @agoose77 in https://github.com/scikit-hep/uproot5/pull/900\r\n\r\n## Bug-fixes and performance\r\n\r\n* fix: issues with members when dealing with non-numeric branches issue #906 by @ioanaif in https://github.com/scikit-hep/uproot5/pull/910\r\n* fix: interpretation for arrays of non-numerical objects issue 880 part2 by @ioanaif in https://github.com/scikit-hep/uproot5/pull/911\r\n\r\n## Other\r\n\r\n* chore: update pre-commit hooks by @pre-commit-ci in https://github.com/scikit-hep/uproot5/pull/902\r\n* chore: update pre-commit hooks by @pre-commit-ci in https://github.com/scikit-hep/uproot5/pull/915\r\n* chore: ruff moved to astral-sh by @henryiii in https://github.com/scikit-hep/uproot5/pull/913\r\n* chore: target-version no longer needed by Black or Ruff by @henryiii in https://github.com/scikit-hep/uproot5/pull/914\r\n\r\n**Full Changelog**: https://github.com/scikit-hep/uproot5/compare/v5.0.9...v5.0.10\n\n<hr /><em>This discussion was created from the release <a href='https://github.com/scikit-hep/uproot5/releases/tag/v5.0.10'>Version 5.0.10</a>.</em>",
+  "comments":{
+   "nodes":[],
+   "totalCount":0
+  },
+  "createdAt":"2023-07-06T20:17:43Z",
+  "number":917,
+  "title":"Version 5.0.10",
+  "url":"https://github.com/scikit-hep/uproot5/discussions/917"
+ },
+ {
+  "author":{
+   "login":"nakolkar16"
+  },
+  "body":"Dear uproot users,\r\n\r\nI have a ROOT file with such format: treename;1 treename;2 treename;3 anothertree;13 anothertree;14\r\nNow I want uproot to only consider the latest ttree which is the ttree with the highest number. I am aware that I can call the ttree just by its name and it will get the latest one but what if I want to extract the treename inside a loop. Something like this:\r\nf = uproot.open(\"file.root\")\r\nfor tree in f.keys(): \r\n    do something only with the LATEST ttree not the others! (I want to accomplish this)\r\n\r\nThank you in advance!\r\n\r\n\r\n",
+  "comments":{
+   "nodes":[
+    {
+     "author":{
+      "login":"ekourlit"
+     },
+     "body":"First and simply, to get the last element of the `f.keys()` list you can just do `last_tree = f.keys()[-1]`.  \r\nHowever, if you have multiple trees with the same name and just an additional \";1\", \";2\", etc. this is usually something internal to the ROOT files and the user should just call the tree name \"treename\" without caring about those additional numbers. For example:\r\n```python\r\nwith uproot.open(\"file.root\") as f:\r\n    tree = f['treename']\r\n```\r\nIf you want to learn more: https://root-forum.cern.ch/t/aux-1-aux-2-aux3/13345",
+     "createdAt":"2023-07-16T21:17:36Z",
+     "number":6462464,
+     "replies":{
+      "nodes":[
+       {
+        "author":{
+         "login":"jpivarski"
+        },
+        "body":"I guess it's true that the keys will always be in cycle order, and the return value of `keys` is a list, not an iterable, but you might have a situation in which there's more than one object, irrespective of the cycle number.\r\n\r\nThe `cycle=False` kwarg was made for this.",
+        "createdAt":"2023-07-16T21:37:14Z",
+        "number":6462534
+       }
+      ],
+      "totalCount":1
+     }
+    },
+    {
+     "author":{
+      "login":"NJManganelli"
+     },
+     "body":"The keys and items methods have a kwarg cycle number, simply set it to false and you will get the keys without cycle number appended. For items, that means you\u2019ll only grab the latest version for that key.",
+     "createdAt":"2023-07-16T21:23:18Z",
+     "number":6462485,
+     "replies":{
+      "nodes":[
+       {
+        "author":{
+         "login":"nakolkar16"
+        },
+        "body":"Thank you very much for the answer. I used cycle=False kwarg while calling the keys and it grabbed the latest key",
+        "createdAt":"2023-07-17T11:43:05Z",
+        "number":6466853
+       }
+      ],
+      "totalCount":1
+     }
+    }
+   ],
+   "totalCount":2
+  },
+  "createdAt":"2023-07-16T00:15:13Z",
+  "number":921,
+  "title":"Reading a ROOT file with multiple cycles of ttrees",
+  "url":"https://github.com/scikit-hep/uproot5/discussions/921"
+ },
+ {
+  "author":{
+   "login":"SengerM"
+  },
+  "body":"I am using uproot to read root files. My files are such that I am doing this:\r\n```python\r\nifile = uproot.open(path_to_root_file)\r\n\r\nmetadata = ifile['Metadata']\r\nwaveforms = ifile['Waveforms']\r\n\r\nwaveforms.show()\r\nwaveforms_of_event_50 = waveforms['voltages'].array()[50]\r\nprint(waveforms_of_event_50)\r\n```\r\nand I get as output\r\n```\r\nname                 | typename                 | interpretation                \r\n---------------------+--------------------------+-------------------------------\r\nevent                | int32_t                  | AsDtype('>i4')\r\nproducer             | std::string              | AsStrings()\r\nvoltages             | std::vector<std::vect... | AsObjects(AsVector(True, As...\r\n[[0.00647, 0.00647, 0.00671, 0.00647, ..., 0.00769, 0.00769, 0.00647], ...]\r\n```\r\nSince the `waveforms['voltages']` is an array of array of waveforms, it is heavy and, consequently, the line `waveforms_of_event_50 = waveforms['voltages'].array()[50]` takes long, because it has to load all the waveforms into memory only to discard all of them but the 50th. Even more, for some of the files this is not even possible because they simply don't fit in memory (40-60 GB). What I want to do is instead to get the `i`th waveform without loading all of them into memory, which I understand is one of the things root files are good for (I am not a root user, just learning), i.e. something like `waveforms['voltages'].get_element_number(50)`. Is this possible? How?",
+  "comments":{
+   "nodes":[
+    {
+     "author":{
+      "login":"jpivarski"
+     },
+     "body":"The best you can do is\r\n\r\n```python\r\nwaveforms_of_event_50 = waveforms['voltages'].array(entry_start=50, entry_stop=51)[0]\r\n```\r\n\r\nThis will read the minimum physically possible, which is one TBasket. The TBasket might be several kB or maybe a few MB of data. Data in TTrees are not stored in smaller granularity than this, and each chunk is generally compressed, so you have to read the whole thing to decompress it. It will definitely solve you problem with tens of GB, though: I don't think it's possible for a single TBasket to get that large.\r\n\r\nThis is not a good pattern if, right after this, you want to read the waveform of event 51, because it's probably in the same TBasket that you just read, and\r\n\r\n```python\r\nwaveforms_of_event_51 = waveforms['voltages'].array(entry_start=51, entry_stop=52)[0]\r\n```\r\n\r\nwould read it again. If you want to load just one TBasket at a time, see [TBranch.basket_entry_start_stop](https://uproot.readthedocs.io/en/latest/uproot.behaviors.TBranch.TBranch.html#basket-entry-start-stop) to know where to put your `entry_start`, `entry_stop` boundaries.",
+     "createdAt":"2023-07-21T17:51:53Z",
+     "number":6512115,
+     "replies":{
+      "nodes":[],
+      "totalCount":0
+     }
+    }
+   ],
+   "totalCount":1
+  },
+  "createdAt":"2023-07-21T16:42:00Z",
+  "number":924,
+  "title":"Getting the i-th element without loading whole array",
+  "url":"https://github.com/scikit-hep/uproot5/discussions/924"
+ },
+ {
+  "author":{
+   "login":"sbdrchauhan"
+  },
+  "body":"I know to open large files, it is best to use `uproot.iterate()` with `step_size` option. But step_size is different for each file. I want to do the operation for each eventID, so I want to make pandas dataframe to perform analysis for each groupby object for each eventID. If I use some fixed step_size, won't it chop off the dataframe in the middle of the event, and I won't be able to do groupby analysis as it chops not at every eventID.\r\n\r\nSomething like this:\r\n![image](https://github.com/scikit-hep/uproot5/assets/58833553/c5b61164-7780-433b-8803-85a5437f103c)\r\n\r\nhere calculateUVW() method should get dataframe for each eventID, but step_size might chop off in the middle of eventID and my analysis might be incorrect.\r\n\r\nThank you",
+  "comments":{
+   "nodes":[],
+   "totalCount":0
+  },
+  "createdAt":"2023-07-28T15:36:49Z",
+  "number":925,
+  "title":"reading multiple large root files (each of about 1GB) trying to read each file at a time to pandas df for groupby operation",
+  "url":"https://github.com/scikit-hep/uproot5/discussions/925"
+ },
+ {
+  "author":{
+   "login":"roy-brener-cern"
+  },
+  "body":"Dear Jim, uprooters _et al._,\r\n\r\nI am running an `uproot` program which reads-in `.root` trees, conducts an analysis and writes into trees in ouput `.root` files. The program uses `utils.make_chunk_events` from `UprootFramework`. Each of the ntuples being read contain a varying number of `.root` files which amount to varying sizes per ntuple (from ~`0.5 GB` to ~`1.5 TB` which correspond to ~1 to ~350 files per ntuple).\r\n\r\nRecently, it has occurred to me that the program is **extremely** sensitive to the `step_size` parameter, both in terms of calculation speed and memory usage. _E.g._ when running with the nominal `1.5 GB` (as given in the documentation), the chunks (see above) become very large and the memory usage of the program increases dramatically (~O(`20 GB`)). Conversely, reducing the `step_size` to `50 MB` (`75 MB` and `100 MB` give similar results) reduces the chunk size and requires much less memory during the run. Reducing `step_size` too much to about `2 MB` results in the chunk size being extremely small and total running time quite long. Also, the memory usage whilst using a ~ `2 MB` `step_size` is not kept low during a long run, and increases to about `6 GB` after an ~hour's run.\r\n\r\nIt seems there is a non-linear dependence of running time and memory usage on `step_size` and it's hard to understand what the optimal `step_size` is, per size of the input ntuple. Similarly, it seems that during a run, the memory usage increases and it is not clear whether it reaches a steady-state. To that effect, I thought setting `parallel=False` might help be more memory-conservative, but it's unclear whether this helps. It is hard to test and know, for a run that's anticipated to take many hours to complete.\r\n\r\nCould someone kindly provide some information about these issues? Having read the documentation, it's very unclear how to tune the `step_size` correctly (and whether `parallel=True/False` has anything to do with restricting memory consumption). Given this program is meant to run on a very large amount of datasets in a batch system, it would be very helpful to understand and hence optimise, before exploiting many computing resources.\r\n\r\nMany thanks in advance.\r\n\r\nRoy",
+  "comments":{
+   "nodes":[
+    {
+     "author":{
+      "login":"jpivarski"
+     },
+     "body":"For some clarity on the `step_size` parameter, when it's expressed as a number of bytes, this number of bytes refers to the compressed size of the TBaskets, and it's a per-file average. The [uproot.TBranch.num_entries_for](https://uproot.readthedocs.io/en/latest/uproot.behaviors.TBranch.TBranch.html#num-entries-for) method is used to convert a `memory_size` to a number of entries, and then a constant number of entries is used through the file. When iterating over multiple files or using `uproot.dask` to access multiple files, the `memory_size` \u2192 number of entries is reevaluated in each file.\r\n\r\nWhy use the compressed TBasket size (the size on disk) instead of the uncompressed size or some kind of estimate of the memory space needed by the objects that will be instantiated?\r\n\r\n* Only the compressed size is available without seeking through the TTree. Although it's possible to get the uncompressed size from each TBasket's `TKey`, that would require seeking to arbitrary parts of the file and reading small `TKey` objects. For local files, this means that disk-fetches will likely be needed, since the OS pre-fetches data from files sequentially, and for remote files, this means that the client will need to make many requests to the server, which is bad for latency-bound networks. By contrast, the compressed sizes are all available in the TTree metadata, which is contiguous and needs to be read anyway.\r\n* Even after decompression, a TBasket's size is not necessarily the size of the Python objects that will be instantiated. If the TBranch type is non-jagged numbers (`AsDtype`), then the TBasket size is equal to the allocated array (they are exactly the same data), and if the TBranch type is jagged numbers (`AsJagged`), then they're pretty close (the offsets need minor modification). If the TBranch type is more complicated and it can be handled by AwkwardForth, the output array will be an Awkward Array, probably smaller than the TBaskets themselves, but if the TBranch type is too complicated to be handled by AwkwardForth, then the output array will contain Python objects and its memory use will be huge (and slow).\r\n* In addition, arrays read from TBaskets get concatenated into contiguous arrays, so there should be a 2\u00d7 temporary overhead during the time interval when both copies exist.\r\n\r\nThese issues complicate the relationship between `step_size` and the memory that will be used, but it's usually not very sensitive. Is it possible that your ROOT files have weird combinations of small and large TBaskets? There are tools like [uproot.TBranch.basket_entry_start_stop](https://uproot.readthedocs.io/en/latest/uproot.behaviors.TBranch.TBranch.html#basket-entry-start-stop) to analyze things like this, if you're ready to get into the low-level I/O of your files.",
+     "createdAt":"2023-08-02T15:16:48Z",
+     "number":6618008,
+     "replies":{
+      "nodes":[
+       {
+        "author":{
+         "login":"roy-brener-cern"
+        },
+        "body":"Hi Jim,\r\nThanks for the elaborate reply.\r\nI don't think I have such weird combinations of TBaskets..\r\nCheers,\r\nRoy",
+        "createdAt":"2023-08-03T16:21:14Z",
+        "number":6629755
+       }
+      ],
+      "totalCount":1
+     }
+    }
+   ],
+   "totalCount":1
+  },
+  "createdAt":"2023-08-02T13:37:53Z",
+  "number":926,
+  "title":"Sensitivity of `step_size` parameter",
+  "url":"https://github.com/scikit-hep/uproot5/discussions/926"
+ },
+ {
+  "author":{
+   "login":"rmelchi"
+  },
+  "body":"I am new to uproot, but I have noticed that it is able to recognize histogram types in files created by Root. I was wondering if it is possible to create an histogram profile with uproot and store it in a root file.\r\n\r\nThanks",
+  "comments":{
+   "nodes":[
+    {
+     "author":{
+      "login":"jpivarski"
+     },
+     "body":"Ideally, you'd want to make a profile-style histogram with [hist](https://hist.readthedocs.io/) (maybe the [WeightedMean Storage type](https://hist.readthedocs.io/en/latest/user-guide/storages.html#weightedmean)) and assign that into an [uproot.WritableDirectory](https://uproot.readthedocs.io/en/latest/uproot.writing.writable.WritableDirectory.html). Unfortunately, it doesn't look like Uproot recognizes that hist type directly:\r\n\r\nhttps://github.com/scikit-hep/uproot5/blob/130c55bdfa64426fdc6b2078c2a379dc449c1584/src/uproot/writing/identify.py#L248-L251\r\n\r\nIf Uproot had recognized this histogram type, it would use `uproot.writing.identify.to_TProfile` to convert it into ROOT format. That function is available, though it has a lot of arguments (for all of the data that _would_ come from the hist object):\r\n\r\nhttps://github.com/scikit-hep/uproot5/blob/130c55bdfa64426fdc6b2078c2a379dc449c1584/src/uproot/writing/identify.py#L1552-L1593\r\n\r\nThe problem to be solved is knowing how to convert from the profile-like histogram you have into the arguments for this function. Once that's solved, the output of this function can be assigned directly into the directory:\r\n\r\n```python\r\nwith uproot.recreate(\"some_file.root\") as file:\r\n    file[\"some_profile\"] = uproot.writing.identify.to_TProfile(...)\r\n```\r\n\r\nConversion in the other direction exists: if Uproot extracts a `TProfile` object from a ROOT file and you call `to_boost` on it (hist is a subclass of [boost-histogram](https://boost-histogram.readthedocs.io/)), the data members like `fBinEntries` and `fBinSumw2` get converted into the hist/boost-histogram internal data.\r\n\r\nhttps://github.com/scikit-hep/uproot5/blob/130c55bdfa64426fdc6b2078c2a379dc449c1584/src/uproot/behaviors/TProfile.py#L296-L332\r\n\r\nYou'd want to reverse that transformation.\r\n\r\nIf you do solve this inverse transformation, we'd be in a good position to add it to uproot/writing/identify.py, so that there won't be a `NotImplementedError` anymore...",
+     "createdAt":"2023-08-10T20:44:30Z",
+     "number":6695882,
+     "replies":{
+      "nodes":[],
+      "totalCount":0
+     }
+    }
+   ],
+   "totalCount":1
+  },
+  "createdAt":"2023-08-10T20:19:13Z",
+  "number":932,
+  "title":"How to create a histogram profile in a root file using uproot?",
+  "url":"https://github.com/scikit-hep/uproot5/discussions/932"
+ },
+ {
+  "author":{
+   "login":"jpivarski"
+  },
+  "body":"## New features\r\n\r\n* feat: Support reading from S3 by @veprbl in https://github.com/scikit-hep/uproot5/pull/916\r\n\r\n## Bug-fixes and performance\r\n\r\n* fix: pandas and double nested vectors issue 885 by @ioanaif in https://github.com/scikit-hep/uproot5/pull/912\r\n* fix: don't assume Uproot is in global scope in TPython::Eval by @jpivarski in https://github.com/scikit-hep/uproot5/pull/927\r\n* fix: expressions failing in pandas issue 922 by @ioanaif in https://github.com/scikit-hep/uproot5/pull/930\r\n\r\n## Other\r\n\r\n* chore: use 2x faster black mirror by @henryiii in https://github.com/scikit-hep/uproot5/pull/929\r\n* chore: update pre-commit hooks by @pre-commit-ci in https://github.com/scikit-hep/uproot5/pull/918\r\n\r\n**Full Changelog**: https://github.com/scikit-hep/uproot5/compare/v5.0.10...v5.0.11\n\n<hr /><em>This discussion was created from the release <a href='https://github.com/scikit-hep/uproot5/releases/tag/v5.0.11'>Version 5.0.11</a>.</em>",
+  "comments":{
+   "nodes":[],
+   "totalCount":0
+  },
+  "createdAt":"2023-08-11T17:24:10Z",
+  "number":933,
+  "title":"Version 5.0.11",
+  "url":"https://github.com/scikit-hep/uproot5/discussions/933"
+ },
+ {
+  "author":{
+   "login":"brightneedle"
+  },
+  "body":"I have a dataframe where one or more columns are lists of 1D arrays, eg:\r\n```\r\n   run_number  event_number  pass_vbf_sel  ...                                        bjetTrigSFs      truth_mhh ntag\r\n0      310691          1593         False  ...  ((0.9997807, 0.9997807, 0.9997807, 0.9997807, ...  719639.263731    3\r\n1      303208          1353          True  ...  ((0.9832633, 0.98921436, 0.97731936, 0.9911188...  401586.494818    2\r\n2      307259           419          True  ...  ((0.9763006, 0.98883635, 0.9638313, 0.98624736...  714343.701542    4\r\n3      300863          1293         False  ...  ((0.99956995, 0.99956995, 0.99956995, 0.999569...  492971.115823    3\r\n4      307259           873         False  ...  ((0.9992055, 0.9992055, 0.9992055, 0.9992055, ...  301056.351272    2\r\n```\r\n\r\nWhen I try and write the dataframe to .root using `uproot.recreate`, I get the following error:\r\n\r\n```\r\nTypeError: cannot write Awkward Array type to ROOT file:\r\n\r\n    var * var * float64\r\n```\r\nIs there a way to get round this? I have to be able to keep the same structure as the dataframe, i.e. making N separate 1-D arrays won't work for my application",
+  "comments":{
+   "nodes":[
+    {
+     "author":{
+      "login":"jpivarski"
+     },
+     "body":"This is a data type that Uproot can't write. (The disk-format for `var * var * float64` is completely different from the format for `var * float64`, and `var * float64` can be vectorized, whereas `var * var * float64` can't.)",
+     "createdAt":"2023-08-23T12:09:44Z",
+     "number":6801982,
+     "replies":{
+      "nodes":[],
+      "totalCount":0
+     }
+    }
+   ],
+   "totalCount":1
+  },
+  "createdAt":"2023-08-23T02:53:38Z",
+  "number":945,
+  "title":"Writing pandas DataFrame with Uproot5, var * var * float64",
+  "url":"https://github.com/scikit-hep/uproot5/discussions/945"
+ },
+ {
+  "author":{
+   "login":"JacekHoleczek"
+  },
+  "body":"I need to \"move\" (to here) my original StackOverflow topic: [How can I \"dump\" / get the content of objects of \"experiment specific\" / \"custom\" classes (from a TTree)](https://stackoverflow.com/questions/76938890/how-can-i-dump-get-the-content-of-objects-of-experiment-specific-custom)\r\nApparently, they do not allow any discussions there (they simply deleted my follow-up).\r\n\r\nMany thanks for your reply on the StackOverflow.\r\n\r\nThe standard ROOT provides the [`TFile::MakeProject`](https://root.cern/doc/master/classTFile.html#a5fdd58dba517dd7b70b43332295e529d) method, which can generate \"source code\" for classes present in the file (only \"data members\" are \"recovered\" from the \"streamer info\", of course).\r\nI understand `uproot` does not provide such functionality (i.e., I cannot get \"automatically generated\" Python classes), or does it?\r\n\r\nTo start, I'd now like to play with the small \"`header`\" tree that has only a single branch.\r\nThe `root_directory['header'].show()` returns:\r\n\r\n```text\r\nPOTInfo_v2           | Header                   | AsObjects(Model_Header)\r\n```\r\n\r\nThe `root_directory.file.show_streamers('Header')` returns:\r\n\r\n```text\r\nHeader (v1)\r\n    _POT_CountedPerFile: double (TStreamerBasicType)\r\n    _POT_NoCut: double (TStreamerBasicType)\r\n    _POT_BadBeam: double (TStreamerBasicType)\r\n    _POT_BadND280: double (TStreamerBasicType)\r\n    _POT_GoodBeamGoodND280: double (TStreamerBasicType)\r\n    _POT_0KA: double (TStreamerBasicType)\r\n    _POT_200KA: double (TStreamerBasicType)\r\n    _POT_250KA: double (TStreamerBasicType)\r\n    _POT_m250KA: double (TStreamerBasicType)\r\n    _POT_OtherKA: double (TStreamerBasicType)\r\n    _POTInfo: double (TStreamerBasicType)\r\n    _Spill_NoCut: int (TStreamerBasicType)\r\n    _Spill_BadBeam: int (TStreamerBasicType)\r\n    _Spill_BadND280: int (TStreamerBasicType)\r\n    _Spill_GoodBeamGoodND280: int (TStreamerBasicType)\r\n    _SpillInfo: int (TStreamerBasicType)\r\n    _IsMC: bool (TStreamerBasicType)\r\n    _SoftwareVersion: string (TStreamerSTLstring)\r\n    _pot_def_counter: int (TStreamerBasicType)\r\n    _spill_def_counter: int (TStreamerBasicType)\r\n```\r\n\r\nSo, there are just some `double`, some `int`, one `bool`, and one `std::string` ordinary variables (no arrays at all).\r\n\r\nHowever, when I look at the [`TFile::MakeProject`](https://root.cern/doc/master/classTFile.html#a5fdd58dba517dd7b70b43332295e529d) method output, I can see two arrays:\r\n\r\n```text\r\n   (...)\r\n   Double_t    _POTInfo[13];\r\n   (...)\r\n   Int_t       _SpillInfo[6];\r\n   (...)\r\n```\r\n\r\nWhen I try to retrieve just the first entry:\r\n\r\n```python\r\nroot_directory['header']['POTInfo_v2'].array(entry_stop=1)\r\n```\r\n\r\nI get (note: it now thinks `_POTInfo` and `_SpillInfo` are arrays and their lengths are fine, too):\r\n\r\n```text\r\n(...)\r\nDeserializationError: while reading\r\n\r\n    Header version 6792 as uproot.dynamic.Model_Header_v1 (71320410 bytes)\r\n        _POT_CountedPerFile: 2.6612249000050942e-110\r\n        _POT_NoCut: 0.0\r\n        _POT_BadBeam: 0.0\r\n        _POT_BadND280: 0.0\r\n        _POT_GoodBeamGoodND280: 0.0\r\n        _POT_0KA: 0.0\r\n        _POT_200KA: 0.0\r\n        _POT_250KA: 0.0\r\n        _POT_m250KA: 0.0\r\n        _POT_OtherKA: 3.7076069415964e-310\r\n        _POTInfo: array([7.67844769e-239, 0.00000000e+000, 0.00000000e+000, 3.70760694e-310,\r\n       7.67844769e-239, 0.00000000e+000, 0.00000000e+000, 0.00000000e+000,\r\n       0.00000000e+000, 0.00000000e+000, 0.00000000e+000, 0.00000000e+000,\r\n       0.00000000e+000], dtype='>f8')\r\n        _Spill_NoCut: 0\r\n        _Spill_BadBeam: 0\r\n        _Spill_BadND280: 96\r\n        _Spill_GoodBeamGoodND280: -1051394048\r\n        _SpillInfo: array([          0,           0,          96, -1051394048,         320,\r\n              2304], dtype='>i4')\r\n        _IsMC: True\r\nMembers for Header: (_POT_CountedPerFile), (_POT_NoCut), (_POT_BadBeam), (_POT_BadND280), (_POT_GoodBeamGoodND280), (_POT_0KA), (_POT_200KA), (_POT_250KA), (_POT_m250KA), (_POT_OtherKA), (_POTInfo), (_Spill_NoCut), (_Spill_BadBeam), (_Spill_BadND280), (_Spill_GoodBeamGoodND280), (_SpillInfo), (_IsMC), _SoftwareVersion, _pot_def_counter, _spill_def_counter\r\n\r\nattempting to get bytes 234:283\r\noutside expected range 0:246 for this Chunk\r\nin file NumuCCMultiPi_MCrun4.root\r\nin object /header;1\r\n```\r\n\r\nIt seems I'm missing something again (adding `library='ak'`, `library='np'`, or `library='pd'` does not help).\r\n",
+  "comments":{
+   "nodes":[
+    {
+     "author":{
+      "login":"JacekHoleczek"
+     },
+     "body":"I decided to try another branch that belongs to another small \"`config`\" tree.\r\nThe `root_directory['config'].show(filter_name='*rootStep')` returns:\r\n\r\n```text\r\nSEL/SEL._rootStep    | StepBase*[]              | AsObjects(AsArray(True, False, AsPointer(Model_StepBase), ()))\r\n```\r\n\r\nThe `root_directory.file.show_streamers('StepBase')` returns (note: it doesn't show what the `StepBase::TypeEnum` is):\r\n\r\n```text\r\nTObject (v1)\r\n    fUniqueID: unsigned int (TStreamerBasicType)\r\n    fBits: unsigned int (TStreamerBasicType)\r\n\r\nStepBase (v1): TObject (v1)\r\n    _type: StepBase::TypeEnum (TStreamerBasicType)\r\n    _break: bool (TStreamerBasicType)\r\n    _title: string (TStreamerSTLstring)\r\n    _disabledInBranch: vector<bool> (TStreamerSTL)\r\n    _nextSteps: vector<StepBase*> (TStreamerSTL)\r\n    _branchUniqueIDs: vector<unsigned int> (TStreamerSTL)\r\n```\r\n\r\nFor the \"`_type: StepBase::TypeEnum`\" leaf, the [TFile::MakeProject](https://root.cern/doc/master/classTFile.html#a5fdd58dba517dd7b70b43332295e529d) method output shows:\r\n\r\n```text\r\n(...)\r\nenum TypeEnum { kDefault_TypeEnum };\r\n(...)\r\n   Int_t       _type;\r\n(...)\r\n```\r\n\r\n\r\nWhen I try to retrieve just the first entry:\r\n\r\n```python\r\nroot_directory['config']['SEL/SEL._rootStep'].array(entry_stop=1, library='np')\r\n```\r\n\r\nI get:\r\n\r\n```text\r\n(...)\r\nNotImplementedError: memberwise serialization of AsArray\r\nin file NumuCCMultiPi_MCrun4.root\r\n```\r\n\r\nUsing `library='pd'` does not help (`library='ak'` generates an \"arbitrary pointer\" `ValueError`).",
+     "createdAt":"2023-08-26T16:59:11Z",
+     "number":6830992,
+     "replies":{
+      "nodes":[],
+      "totalCount":0
+     }
+    }
+   ],
+   "totalCount":1
+  },
+  "createdAt":"2023-08-24T09:13:33Z",
+  "number":948,
+  "title":"How can I \"dump\" / get the content of objects of \"experiment specific\" / \"custom\" classes (from a TTree)",
+  "url":"https://github.com/scikit-hep/uproot5/discussions/948"
+ },
+ {
+  "author":{
+   "login":"alpetukhov"
+  },
+  "body":"Dear `uproot` developers!\r\n\r\nI'm trying to read a `.root` file that contains branches with `TLorentzVector`s in the following form\r\n```python\r\nimport uproot\r\n\r\nf = uproot.open('file:tree:)\r\np = f.arrays([\"truth_p4\"])\r\nprint(p.truth_p4[0])\r\n```\r\n```\r\n{fP: {fX: 2.12e+04, fY: -3.81e+03, fZ: 1.38e+04}, fE: 2.56e+04}\r\n```\r\n\r\nAfter I've requested this branch, I have access to any of its fields, e.g. this\r\n```python\r\np.truth_p4.fE\r\n```\r\nyields\r\n```\r\n<Array [2.56e+04, 9.36e+04, ... 2.17e+04] type='54465 * float64'>\r\n```\r\n\r\nI've seen in [discussions here](https://github.com/scikit-hep/uproot5/issues/131#issuecomment-719791936) that there's possibility to access the fields directly in the `expressions` fields of `arrays` or `iterate`. I want it to specify the aliases upfront to simplify the request for branches like transverse momentum of pseudorapidity.\r\n\r\nBut if I try to run \r\n```python\r\nf.arrays([\"truth_p4.fE\"])\r\n```\r\n\r\nI get the following errors\r\n```\r\nUnexpected exception formatting exception. Falling back to standard exception\r\nTraceback (most recent call last):\r\n  File \"/home/alex/trt_pid_venv/lib/python3.8/site-packages/uproot/language/python.py\", line 382, in free_symbols\r\n    )\r\n  File \"/home/alex/trt_pid_venv/lib/python3.8/site-packages/uproot/language/python.py\", line 92, in _walk_ast_yield_symbols\r\n  File \"/home/alex/trt_pid_venv/lib/python3.8/site-packages/uproot/language/python.py\", line 97, in _walk_ast_yield_symbols\r\n    else:\r\n  File \"/home/alex/trt_pid_venv/lib/python3.8/site-packages/uproot/language/python.py\", line 92, in _walk_ast_yield_symbols\r\n  File \"/home/alex/trt_pid_venv/lib/python3.8/site-packages/uproot/language/python.py\", line 87, in _walk_ast_yield_symbols\r\nKeyError: 'truth_p4.fE'\r\n\r\nDuring handling of the above exception, another exception occurred:\r\n\r\nTraceback (most recent call last):\r\n  File \"/home/alex/trt_pid_venv/lib/python3.8/site-packages/IPython/core/interactiveshell.py\", line 3508, in run_code\r\n    exec(code_obj, self.user_global_ns, self.user_ns)\r\n  File \"/tmp/ipykernel_1902/203329954.py\", line 1, in <module>\r\n    f.arrays([\"truth_p4.fE\"])\r\n  File \"/home/alex/trt_pid_venv/lib/python3.8/site-packages/uproot/behaviors/TBranch.py\", line 1095, in arrays\r\n  File \"/home/alex/trt_pid_venv/lib/python3.8/site-packages/uproot/behaviors/TBranch.py\", line 3285, in _regularize_expressions\r\n  File \"/home/alex/trt_pid_venv/lib/python3.8/site-packages/uproot/behaviors/TBranch.py\", line 3151, in _regularize_expression\r\n  File \"/home/alex/trt_pid_venv/lib/python3.8/site-packages/uproot/language/python.py\", line 388, in free_symbols\r\nuproot.exceptions.KeyInFileError: not found: 'truth_p4.fE'\r\nin file /file.root\r\nin object /tree;1\r\n\r\nDuring handling of the above exception, another exception occurred:\r\n\r\nTraceback (most recent call last):\r\n  File \"/home/alex/trt_pid_venv/lib/python3.8/site-packages/IPython/core/interactiveshell.py\", line 2105, in showtraceback\r\n    stb = self.InteractiveTB.structured_traceback(\r\n  File \"/home/alex/trt_pid_venv/lib/python3.8/site-packages/IPython/core/ultratb.py\", line 1396, in structured_traceback\r\n    return FormattedTB.structured_traceback(\r\n  File \"/home/alex/trt_pid_venv/lib/python3.8/site-packages/IPython/core/ultratb.py\", line 1287, in structured_traceback\r\n    return VerboseTB.structured_traceback(\r\n  File \"/home/alex/trt_pid_venv/lib/python3.8/site-packages/IPython/core/ultratb.py\", line 1140, in structured_traceback\r\n    formatted_exception = self.format_exception_as_a_whole(etype, evalue, etb, number_of_lines_of_context,\r\n  File \"/home/alex/trt_pid_venv/lib/python3.8/site-packages/IPython/core/ultratb.py\", line 1055, in format_exception_as_a_whole\r\n    frames.append(self.format_record(record))\r\n  File \"/home/alex/trt_pid_venv/lib/python3.8/site-packages/IPython/core/ultratb.py\", line 955, in format_record\r\n    frame_info.lines, Colors, self.has_colors, lvals\r\n  File \"/home/alex/trt_pid_venv/lib/python3.8/site-packages/IPython/core/ultratb.py\", line 778, in lines\r\n    return self._sd.lines\r\n  File \"/home/alex/trt_pid_venv/lib/python3.8/site-packages/stack_data/utils.py\", line 144, in cached_property_wrapper\r\n    value = obj.__dict__[self.func.__name__] = self.func(obj)\r\n  File \"/home/alex/trt_pid_venv/lib/python3.8/site-packages/stack_data/core.py\", line 734, in lines\r\n    pieces = self.included_pieces\r\n  File \"/home/alex/trt_pid_venv/lib/python3.8/site-packages/stack_data/utils.py\", line 144, in cached_property_wrapper\r\n    value = obj.__dict__[self.func.__name__] = self.func(obj)\r\n  File \"/home/alex/trt_pid_venv/lib/python3.8/site-packages/stack_data/core.py\", line 681, in included_pieces\r\n    pos = scope_pieces.index(self.executing_piece)\r\n  File \"/home/alex/trt_pid_venv/lib/python3.8/site-packages/stack_data/utils.py\", line 144, in cached_property_wrapper\r\n    value = obj.__dict__[self.func.__name__] = self.func(obj)\r\n  File \"/home/alex/trt_pid_venv/lib/python3.8/site-packages/stack_data/core.py\", line 660, in executing_piece\r\n    return only(\r\n  File \"/home/alex/trt_pid_venv/lib/python3.8/site-packages/executing/executing.py\", line 190, in only\r\n    raise NotOneValueFound('Expected one value, found 0')\r\nexecuting.executing.NotOneValueFound: Expected one value, found 0\r\n```\r\n\r\nI've got it with `uproot` 4.1.0 and `awkward` 1.4.0, updated to `uproot` 5.0.11 and `awkward` 2.4.2 but got the same results.\r\n\r\nIs there a way to access the fields of the `TLorentzVector` in the `expressions` or `aliases`?\r\n\r\nThanks in advance,\r\nAleksandr",
+  "comments":{
+   "nodes":[
+    {
+     "author":{
+      "login":"alpetukhov"
+     },
+     "body":"I've got another question about the `expressions` that I think I'll also post here to not create too many new topic.\r\nI want to get the sums of all the variables in the array (simple array of `int`s). I can get it with\r\n```python\r\nimport uproot\r\nimport awkward as ak\r\n\r\nf = uproot.open(file_path)\r\na = f.arrays([\"InDetTrackParticles_hit_gasType\"])\r\nak.sum(a['InDetTrackParticles_hit_gasType'], axis=1)\r\n```\r\n\r\nbut if I try to run it as\r\n\r\n```python\r\nf.arrays(['sum(InDetTrackParticles_hit_gasType, axis=1)'])\r\n```\r\n\r\nI get the error\r\n\r\n```\r\nKeyInFileError: not found: 'sum'\r\nin file file.root\r\nin object tree;1\r\n```\r\n\r\nShouldn't the `sum` translate to `ak.sum` here? I've got the `ak.where` to work in `expression`, so it is strange to me that `sum` is not working properely.\r\nSorry if those are basic questions, but I wasn't able to find the info in the docs or to Google it.",
+     "createdAt":"2023-09-15T14:37:58Z",
+     "number":7015067,
+     "replies":{
+      "nodes":[],
+      "totalCount":0
+     }
+    },
+    {
+     "author":{
+      "login":"jpivarski"
+     },
+     "body":"In the case of #131, the things with names like `\"Tracks.fCoordinates.fX\"` are TBranches. Using a dotted name in `expressions` makes it look for a TBranch with that name. A TLorentzVector is a single TBranch; the structure is inside of it\u2014there is no TBranch in your file named `\"truth_p4.fE\"`.[^1]\r\n\r\nOutside of the `expressions`, if you have an Awkward Array named `truth_p4`, then asking for `.fE` extracts a field from it as a projection. That's something where a different library (Awkward vs Uproot) uses the same syntax for a different purpose.\r\n\r\nThe set of functions available in the `expressions` argument of [uproot.TTree.arrays](https://uproot.readthedocs.io/en/latest/uproot.behaviors.TTree.TTree.html#arrays) and similar is a closed-off set, like NumExpr. Here's the default set:\r\n\r\nhttps://github.com/scikit-hep/uproot5/blob/ac2317906ccb7cf04a04efbddc8a7f27bc29a249/src/uproot/language/python.py#L258-L319\r\n\r\nWe could add `numpy.sum` to that\u2014not a bad idea! It would involve adding `\"sum\": numpy.sum` to the list and adding a test to the [tests](https://github.com/scikit-hep/uproot5/tree/main/tests) directory, using one of the existing tests as an example, like [test_0930-...](https://github.com/scikit-hep/uproot5/blob/main/tests/test_0930-expressions-in-pandas.py).\r\n\r\nIt's also possible to use more functions than the default set without changing Uproot. Functions like [uproot.TTree.arrays](https://uproot.readthedocs.io/en/latest/uproot.behaviors.TTree.TTree.html#arrays) have a `language` argument, which take an [uproot.language.Language](https://uproot.readthedocs.io/en/latest/uproot.language.Language.html) object. There's only one concrete subclass, [uproot.language.python.PythonLanguage](https://uproot.readthedocs.io/en/latest/uproot.language.python.PythonLanguage.html), which can be constructed with a new set of `functions`:\r\n\r\n```python\r\nPythonLanguage(PythonLanguage.default_functions | {\"sum\": np.sum})\r\n```\r\n\r\n(Note: `d1 | d2` is Python 3.9+ syntax; for older Pythons, use `dict(PythonLanguage.default_functions, sum=np.sum)`.)\r\n\r\nIt's interesting that you bring this up now because @aryan26roy is currently working on a second [uproot.language.python.PythonLanguage](https://uproot.readthedocs.io/en/latest/uproot.language.python.PythonLanguage.html) with the traditional `TTree::Draw` syntax.\r\n\r\n[^1]: Maybe it would be possible to change Uproot so that it can do this. Currently, it treats all dotted expressions as the names of TBranches, but if the [_attribute_to_dotted_name](https://github.com/scikit-hep/uproot5/blob/ac2317906ccb7cf04a04efbddc8a7f27bc29a249/src/uproot/language/python.py#L39-L51) function were given a list of all TBranch names, it could _stop_ descending into attributes if there are no TBranches with that name. For instance, if there are TBranches named `\"a.b\"` and `\"a.b.c\"` but no `\"a.b.c.d\"` and the `expressions` encounters `a.b.c.d.e`, then perhaps it should assume that you want to take the TBranch named `\"a.b.c\"` and let Awkward Array project field `d` and subfield `e` from it? Or would that rule make it too hard to predict what it's attempting to do? When we provide an interface, we need to make sure that it's easily understood by its users.",
+     "createdAt":"2023-09-15T15:41:49Z",
+     "number":7015744,
+     "replies":{
+      "nodes":[],
+      "totalCount":0
+     }
+    }
+   ],
+   "totalCount":2
+  },
+  "createdAt":"2023-09-15T09:08:19Z",
+  "number":959,
+  "title":"Unable to access an otherwise available field of TLorentzVector in `expressions`",
+  "url":"https://github.com/scikit-hep/uproot5/discussions/959"
+ },
+ {
+  "author":{
+   "login":"jpivarski"
+  },
+  "body":"## New features\r\n\r\n_(none!)_\r\n\r\n## Bug-fixes and performance\r\n\r\n* fix: changelog script ignores releases past 5.0.0rc2 by @JostMigenda in https://github.com/scikit-hep/uproot5/pull/935\r\n* fix: clamp start and stop by @agoose77 in https://github.com/scikit-hep/uproot5/pull/941\r\n* fix: get package import messages up-to-date by @jpivarski in https://github.com/scikit-hep/uproot5/pull/947\r\n* fix: tests were failing because dask_awkward.lib.testutils needs pyarrow by @jpivarski in https://github.com/scikit-hep/uproot5/pull/957\r\n* fix: add minimimal emscripten support via non-HTTP sources by @agoose77 in https://github.com/scikit-hep/uproot5/pull/956\r\n* fix: remove pyarrow import as a dependence coming from dask-awkward in tests by @ioanaif in https://github.com/scikit-hep/uproot5/pull/961\r\n\r\n## Other\r\n\r\n* refactor: use public typetracer API by @agoose77 in https://github.com/scikit-hep/uproot5/pull/894\r\n* test: better test for vectorVectorDouble by @jpivarski in https://github.com/scikit-hep/uproot5/pull/942\r\n* docs: add natsukium as a contributor for test by @allcontributors in https://github.com/scikit-hep/uproot5/pull/937\r\n* docs: add JostMigenda as a contributor for doc by @allcontributors in https://github.com/scikit-hep/uproot5/pull/938\r\n* docs: _dask.py: fix docstring formatting by @veprbl in https://github.com/scikit-hep/uproot5/pull/955\r\n* chore: skip pandas test if pandas is not installed by @natsukium in https://github.com/scikit-hep/uproot5/pull/934\r\n* chore: update pre-commit hooks by @pre-commit-ci in https://github.com/scikit-hep/uproot5/pull/939\r\n* chore: update pre-commit hooks by @pre-commit-ci in https://github.com/scikit-hep/uproot5/pull/944\r\n* chore: update pre-commit hooks by @pre-commit-ci in https://github.com/scikit-hep/uproot5/pull/950\r\n* chore(deps): bump actions/checkout from 3 to 4 by @dependabot in https://github.com/scikit-hep/uproot5/pull/952\r\n* chore: update pre-commit hooks by @pre-commit-ci in https://github.com/scikit-hep/uproot5/pull/953\r\n\r\n## New Contributors\r\n* @natsukium made their first contribution in https://github.com/scikit-hep/uproot5/pull/934\r\n* @JostMigenda made their first contribution in https://github.com/scikit-hep/uproot5/pull/935\r\n\r\n**Full Changelog**: https://github.com/scikit-hep/uproot5/compare/v5.0.11...v5.0.12\n\n<hr /><em>This discussion was created from the release <a href='https://github.com/scikit-hep/uproot5/releases/tag/v5.0.12'>Version 5.0.12</a>.</em>",
+  "comments":{
+   "nodes":[],
+   "totalCount":0
+  },
+  "createdAt":"2023-09-21T16:16:37Z",
+  "number":963,
+  "title":"Version 5.0.12",
+  "url":"https://github.com/scikit-hep/uproot5/discussions/963"
+ },
+ {
+  "author":{
+   "login":"jpivarski"
+  },
+  "body":"## New features\r\n\r\n* feat: add TLeafC - string - writing support by @ioanaif in https://github.com/scikit-hep/uproot5/pull/940\r\n* feat: adding a very basic FSSpecSource by @lobis in https://github.com/scikit-hep/uproot5/pull/967\r\n\r\n## Bug-fixes and performance\r\n\r\n* fix: inverted axes for variances of 2D weighted histograms when transformed to hist by @ioanaif in https://github.com/scikit-hep/uproot5/pull/965\r\n\r\n# Other\r\n\r\n* test: skip RNTuple test until #928 is fixed by @jpivarski in https://github.com/scikit-hep/uproot5/pull/969\r\n* test: skip if dask-awkward, an optional dependency, is missing by @jpivarski in https://github.com/scikit-hep/uproot5/pull/968\r\n* chore: update pre-commit hooks by @pre-commit-ci in https://github.com/scikit-hep/uproot5/pull/964\r\n* test: use file in skhep-testdata for issue #121 by @lobis in https://github.com/scikit-hep/uproot5/pull/973\r\n\r\n\r\n**Full Changelog**: https://github.com/scikit-hep/uproot5/compare/v5.0.12...v5.1.0rc1\n\n<hr /><em>This discussion was created from the release <a href='https://github.com/scikit-hep/uproot5/releases/tag/v5.1.0rc1'>Version 5.1.0rc1</a>.</em>",
+  "comments":{
+   "nodes":[],
+   "totalCount":0
+  },
+  "createdAt":"2023-10-06T20:05:59Z",
+  "number":978,
+  "title":"Version 5.1.0rc1",
+  "url":"https://github.com/scikit-hep/uproot5/discussions/978"
+ },
+ {
+  "author":{
+   "login":"jpivarski"
+  },
+  "body":"## New features\r\n\r\n* feat: add TLeafC - string - writing support by @ioanaif in https://github.com/scikit-hep/uproot5/pull/940\r\n* feat: adding a very basic FSSpecSource by @lobis in https://github.com/scikit-hep/uproot5/pull/967\r\n\r\n## Bug-fixes and performance\r\n\r\n* fix: inverted axes for variances of 2D weighted histograms when transformed to hist by @ioanaif in https://github.com/scikit-hep/uproot5/pull/965\r\n* fix: pull out `.data` from `NumpyArray` by @agoose77 in https://github.com/scikit-hep/uproot5/pull/985\r\n\r\n## Other\r\n\r\n* test: skip RNTuple test until #928 is fixed by @jpivarski in https://github.com/scikit-hep/uproot5/pull/969\r\n* test: skip if dask-awkward, an optional dependency, is missing by @jpivarski in https://github.com/scikit-hep/uproot5/pull/968\r\n* test: use file in skhep-testdata for issue #121 by @lobis in https://github.com/scikit-hep/uproot5/pull/973\r\n* chore: update pre-commit hooks by @pre-commit-ci in https://github.com/scikit-hep/uproot5/pull/964\r\n\r\n\r\n**Full Changelog**: https://github.com/scikit-hep/uproot5/compare/v5.0.12...v5.0.13\n\n<hr /><em>This discussion was created from the release <a href='https://github.com/scikit-hep/uproot5/releases/tag/v5.0.13'>Version 5.0.13</a>.</em>",
+  "comments":{
+   "nodes":[],
+   "totalCount":0
+  },
+  "createdAt":"2023-10-12T18:44:36Z",
+  "number":987,
+  "title":"Version 5.0.13",
+  "url":"https://github.com/scikit-hep/uproot5/discussions/987"
+ },
+ {
+  "author":{
+   "login":"jpivarski"
+  },
+  "body":"## New features\r\n\r\n* feat: add TLeafC - string - writing support by @ioanaif in https://github.com/scikit-hep/uproot5/pull/940\r\n* feat: adding a very basic FSSpecSource by @lobis in https://github.com/scikit-hep/uproot5/pull/967\r\n* feat: add support for shape touching in Dask by @agoose77 in https://github.com/scikit-hep/uproot5/pull/966\r\n* feat: improve `uproot.futures` compatibility with `concurrent.futures` by @lobis in https://github.com/scikit-hep/uproot5/pull/983\r\n* feat: Use a single `handler` argument on `uproot.reading.open` by @lobis in https://github.com/scikit-hep/uproot5/pull/971\r\n* feat: `fsspec` source non-blocking chunks by @lobis in https://github.com/scikit-hep/uproot5/pull/979\r\n\r\n## Bug-fixes and performance\r\n\r\n* fix: inverted axes for variances of 2D weighted histograms when transformed to hist by @ioanaif in https://github.com/scikit-hep/uproot5/pull/965\r\n* fix: support `Content` objects in writing by @agoose77 in https://github.com/scikit-hep/uproot5/pull/986\r\n\r\n## Other\r\n\r\n* test: skip RNTuple test until #928 is fixed by @jpivarski in https://github.com/scikit-hep/uproot5/pull/969\r\n* test: skip if dask-awkward, an optional dependency, is missing by @jpivarski in https://github.com/scikit-hep/uproot5/pull/968\r\n* test: use file in skhep-testdata for issue #121 by @lobis in https://github.com/scikit-hep/uproot5/pull/973\r\n* chore: update pre-commit hooks by @pre-commit-ci in https://github.com/scikit-hep/uproot5/pull/964\r\n* chore: bump Python version by @agoose77 in https://github.com/scikit-hep/uproot5/pull/980\r\n* chore: update pre-commit hooks @pre-commit-ci in https://github.com/scikit-hep/uproot5/pull/982\r\n\r\n**Full Changelog**: https://github.com/scikit-hep/uproot5/compare/v5.0.13...v5.1.0\n\n<hr /><em>This discussion was created from the release <a href='https://github.com/scikit-hep/uproot5/releases/tag/v5.1.0'>Version 5.1.0</a>.</em>",
+  "comments":{
+   "nodes":[],
+   "totalCount":0
+  },
+  "createdAt":"2023-10-13T18:59:26Z",
+  "number":989,
+  "title":"Version 5.1.0",
+  "url":"https://github.com/scikit-hep/uproot5/discussions/989"
+ },
+ {
+  "author":{
+   "login":"jpivarski"
+  },
+  "body":"## New features\r\n\r\n_(none!)_\r\n\r\n## Bug-fixes and performance\r\n\r\n* fix: typo in `uproot.source.xrootd.XRootDSource` name by @jpivarski in https://github.com/scikit-hep/uproot5/pull/990\r\n\r\n## Other\r\n\r\n_(none!)_\r\n\r\n\r\n**Full Changelog**: https://github.com/scikit-hep/uproot5/compare/v5.1.0...v5.1.1\n\n<hr /><em>This discussion was created from the release <a href='https://github.com/scikit-hep/uproot5/releases/tag/v5.1.1'>Version 5.1.1</a>.</em>",
+  "comments":{
+   "nodes":[],
+   "totalCount":0
+  },
+  "createdAt":"2023-10-13T20:30:32Z",
+  "number":991,
+  "title":"Version 5.1.1",
+  "url":"https://github.com/scikit-hep/uproot5/discussions/991"
+ },
+ {
+  "author":{
+   "login":"jpivarski"
+  },
+  "body":"## New features\r\n\r\n* feat: add support for current RNTuple files by @ioanaif in https://github.com/scikit-hep/uproot5/pull/962\r\n* feat: refactor url - object split (motivated by `fsspec` integration) by @lobis in https://github.com/scikit-hep/uproot5/pull/976\r\n* feat: `asyncio` LoopExecutor and async fsspec source by @lobis in https://github.com/scikit-hep/uproot5/pull/992\r\n* feat: update the executor submit interface to take keyword arguments and be compatible with `concurrent.futures.ThreadPoolExecutor` by @lobis in https://github.com/scikit-hep/uproot5/pull/1001\r\n\r\n## Bug-fixes and performance\r\n\r\n* fix: remove unused hist import in test_0965 by @GaetanLepage in https://github.com/scikit-hep/uproot5/pull/994\r\n* fix: cache form remapping to avoid per-chunk workload by @agoose77 in https://github.com/scikit-hep/uproot5/pull/998\r\n\r\n## Other\r\n\r\n* docs: add GaetanLepage as a contributor for test by @allcontributors in https://github.com/scikit-hep/uproot5/pull/995\r\n* chore: add types to most of the `uproot.source` module by @lobis in https://github.com/scikit-hep/uproot5/pull/996\r\n* chore: update pre-commit hooks by @pre-commit-ci in https://github.com/scikit-hep/uproot5/pull/993\r\n* chore: add pre-commit formatters for toml and yaml by @lobis in https://github.com/scikit-hep/uproot5/pull/1002\r\n\r\n## New Contributors\r\n* @GaetanLepage made their first contribution in https://github.com/scikit-hep/uproot5/pull/994\r\n\r\n**Full Changelog**: https://github.com/scikit-hep/uproot5/compare/v5.1.1...v5.1.2\n\n<hr /><em>This discussion was created from the release <a href='https://github.com/scikit-hep/uproot5/releases/tag/v5.1.2'>Version 5.1.2</a>.</em>",
+  "comments":{
+   "nodes":[],
+   "totalCount":0
+  },
+  "createdAt":"2023-10-19T22:01:07Z",
+  "number":1003,
+  "title":"Version 5.1.2",
+  "url":"https://github.com/scikit-hep/uproot5/discussions/1003"
+ },
+ {
+  "author":{
+   "login":"bblidaru"
+  },
+  "body":"Hi! \r\nFirst and foremost, I am total newbie interacting with root/uproot -- as end user as you might stumble upon (hardware guy). The usual way I interact with ROOT files is as a product of software I use. \r\nI take the root files generated by said frameworks, read the histograms (TH1, TH2, TProfile, TEfficiency) from the corresponding root file with uproot and process them: manipulate the data and do some fancy plotting using matplotlib. \r\n\r\nUntil now, I've been using uproot like this:\r\n```\r\nfile = uproot.open(\"output.root\")\r\nhistogram = file['simple_histogram']\r\nhistogram.to_hist()\r\n...\r\n```\r\nor using other functions, like `.values()` , `.errors()` ... based on what I want to do.\r\nThis works well and allows me to control the histogram in matplotlib afterwards.\r\n\r\nNow I have a TH1 histogram with an associated fit. Executing the same block of code from above gives me access to the histogram itself, but not to the fit. \r\n**How can I access and plot afterwards with matplotlib the fit function from the root histogram?**\r\nIn case of a simple Gaussian I can also do this in python directly, but for more complex functions not.\r\n\r\nI've tried looking at documentation, but apart from the basic usage of reading histograms I could not find anything else pertaining to this topic. The most similar thread I found here was [this](https://github.com/scikit-hep/uproot5/discussions/744), but it had a different problem.\r\n\r\nIn the end, I'd like to be able to manipulate the fit function (that is, chose how to plot the fit line -- color, line thickness, etc.., but not altering the fit itself and/or its parameters), as well as the histogram (same plotting parameters). If you also have better suggestions to the histogram part from above, I am a very good listener :)\r\n\r\nI attach such an [example dummy root file](https://cernbox.cern.ch/s/07YUByNqDrLyWOA) with a Gaussian histogram and gaus fit. \r\n\r\nFor reference, the code used to generate the histogram:\r\n```\r\nTH1F* hist = new TH1F(\"histogram\", \"Gaussian Histogram\", 100, -5, 5);\r\n\r\n//  random Gaussian data\r\nfor (int i = 0; i < 100000; i++) {\r\n    hist->Fill(gRandom->Gaus(0, 1));\r\n}\r\n\r\n// Gaussian fit function\r\nTF1* fitFunc = new TF1(\"fitFunc\", \"gaus\", -3, 3); \r\nfitFunc->SetParameters(10000, 0, 1); \r\n\r\nhist->Fit(fitFunc, \"R\");\r\n\r\n\r\nTFile* outputFile = new TFile(\"output.root\", \"RECREATE\");\r\nhist->Write(\"histogram_with_fit\");\r\noutputFile->Close();\r\n```\r\n\r\nThank you so very much for reading this! I am available for any questions...\r\n\r\nI am using ROOT Version: 6.24/06 Built for linuxx8664gcc   //  uproot 5.1.2\r\n",
+  "comments":{
+   "nodes":[
+    {
+     "author":{
+      "login":"jpivarski"
+     },
+     "body":"I don't know if anyone has done this before, and we haven't written a nice interface to extract fitted values, but the fit results appear to be in the Uproot deserialization, if you dig.\r\n\r\n```python\r\n>>> import uproot\r\n>>> h = uproot.open(\"output.root:histogram_with_improved_fit\")   # the histogram\r\n>>> f = h.member(\"fFunctions\")[0]                                # the fit function\r\n\r\n>>> f.member(\"fFormula\").member(\"fFormula\")                      # fit function as a string\r\n<TString '[Constant]*exp(-0.5*((x-[Mean])/[Sigma])*((x-[Mean])/[Sigma]))' at 0x7f76607bfa70>\r\n\r\n>>> f.member(\"fFormula\").member(\"fParams\")                       # mapping from name to index\r\n<STLMap {'Constant': 0, 'Mean': 1, 'Sigma': 2} at 0x7f76606bd4e0>\r\n\r\n>>> f.member(\"fFormula\").member(\"fClingParameters\")              # fitted parameters\r\n<STLVector [3998.1535358600363, ..., 0.9969355099011799] at 0x7f76606bd5a0>\r\n\r\n>>> f.member(\"fParErrors\")                                       # uncertainty in the fit\r\n<STLVector [15.817986532882609, ..., 0.0024257088650948555] at 0x7f7660514850>\r\n\r\n>>> f.member(\"fChisquare\")                                       # goodness of fit\r\n74.87458329375289\r\n>>> f.member(\"fNDF\")\r\n57\r\n\r\n>>> import matplotlib.pyplot as plt\r\n>>> plt.plot(list(f.member(\"fSave\")))                            # view the saved fit\r\n[<matplotlib.lines.Line2D object at 0x7f7658c31a20>]\r\n>>> plt.show()\r\n```\r\n\r\n(Uproot's `TString` is a subclass of the builtin Python `str`, `STLMap` is a `Mapping`, and `STLVector` is a `Sequence`.)\r\n\r\nIn principle, this could be wrapped up in a nice interface. The boost-histogram and hist libraries don't deal in fitted curves, but they can take metadata. Maybe the fit results can be attached to a `hist.Hist` in a standardized way that can be passed on to plotting?\r\n\r\nCc: @HDembinski and @henryiii",
+     "createdAt":"2023-10-27T22:00:57Z",
+     "number":7407874,
+     "replies":{
+      "nodes":[
+       {
+        "author":{
+         "login":"bblidaru"
+        },
+        "body":"Hi @jpivarski !\r\nThis works well for this specific case :) not being too familiar with deserialization and subclasses, I would have not found this on my own.\r\n\r\nI am able to get access to the line via `f.member(\"fSave\")`.\r\nHowever, when I try to plot them together, the x-axis range for the fit is different.\r\nI had to resort to the following piece of code to plot the correct range (which seems to be the last two values of the aforementioned list).\r\n```\r\nl = list(f.member(\"fSave\"))                                 \r\nx_values = np.linspace(l[-2], l[-1], len(l[:-2]))     # generating myself the range on the x axis\r\ny_values = l[:-2]                                                 # list of fit values\r\nplt.plot(x_values, y_values, color=\"r\")                # fit function\r\n```\r\n\r\nAlthough this works, not being familiar with ROOT it looks a bit fishy. Is it supposed to be like this?",
+        "createdAt":"2023-10-28T12:08:08Z",
+        "number":7410980
+       },
+       {
+        "author":{
+         "login":"jpivarski"
+        },
+        "body":"The line consists only of _y_ values; we don't know what the _x_ values are supposed to be. Perhaps they're the left edge of each bin, perhaps the right, perhaps the middles. Or they don't line up with bins at all; maybe it's a fixed number (100?) of points between the extreme left and right of the bin range, or maybe from the middle of the first bin to the middle of the last bin, or maybe a little beyond with some margin.\r\n\r\nAlso, I'm suspicious of the two `3` values at the end of the list. It doesn't look like they're supposed to be part of the series: the numbers next to them are not whole numbers and they're much smaller. Oh! Maybe the last two values _are_ the range! Maybe the _x_ values are supposed to be\r\n\r\n```python\r\nnp.linspace(fSave[-2], fSave[-1], len(fSave[:-2]))\r\n```\r\n\r\nI'm guessing because I don't really know what's in the ROOT codebase\u2014so far, we've only looked at the data in the file. Finding the code in ROOT that interprets these values could be hard...\r\n\r\n...or maybe not. This (below) is the function that produces the saved values. It looks like it behaves differently depending on whether the `fParent` is a histogram or not. If the parent is a histogram, the last three values are `xmin`, `xmax`, `xmax` (the signal is that the last two values are equal to each other). If the parent is not a histogram, the last two values are `xmin`, `xmax` (which, presumably, can never be equal to each other).\r\n\r\nhttps://github.com/root-project/root/blob/78c3db808f3bdba324e3e955cbfe275e1392ecec/hist/hist/src/TF1.cxx#L3161-L3208\r\n\r\nAnd this (below) is JavaScript code that draws the function, presumably in the new web-based RBrowser. It first looks at the last two values of `fSave`, and if they're equal, gets `xmin` and `xmax` from the third- and second-to-last values.\r\n\r\nhttps://github.com/root-project/root/blob/78c3db808f3bdba324e3e955cbfe275e1392ecec/js/modules/hist/TF1Painter.mjs#L214-L250\r\n\r\nIn the histogram case (`fSave[-2] == fSave[-1]`), the bins might not be uniformly spaced, and therefore the _x_ positions might not be uniformly spaced.\r\n\r\nAnyway, these are steps toward reverse-engineering this quantity\u2014understanding what ROOT does so that we would be able to do the same in Uproot.",
+        "createdAt":"2023-10-28T15:58:05Z",
+        "number":7412046
+       },
+       {
+        "author":{
+         "login":"bblidaru"
+        },
+        "body":"In order to get closer to what I want, here is what I came up with. \r\nFor the histogram values, I use the `to_numpy()` method and calculate the `mean` and `std dev` myself\r\n```\r\nhst = h.to_numpy()\r\nbin_contents = hst[0]\r\nbin_edges = hst[1]\r\nbin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2\r\nmean_histo = np.sum(bin_contents * bin_centers) / np.sum(bin_contents)\r\nstd_dev = np.sqrt(np.sum((bin_centers - mean_histo)**2 * bin_contents) / np.sum(bin_contents))\r\n```\r\nUnfortunately, I am missing the `underflow` and `overflow`, which are nowhere to be found..\r\n\r\nFor the fit, the extracted values I find quite easily using your indications from above. These are the same ones as ROOT outputs in the `TPaveStats` using `SetOptFit(1)`\r\n```\r\nchi2 = f.member(\"fChisquare\") \r\nndof = f.member(\"fNDF\")\r\nconstant = f.member(\"fFormula\").member(\"fClingParameters\")[0]\r\nconstant_err = f.member(\"fParErrors\")[0]\r\nmean = f.member(\"fFormula\").member(\"fClingParameters\")[1]\r\nmean_err = f.member(\"fParErrors\")[1]\r\nsigma = f.member(\"fFormula\").member(\"fClingParameters\")[2]\r\nsigma_err = f.member(\"fParErrors\")[2]\r\n```\r\n\r\nNaively, I found that I get the same histogram mean without using the aforementioned method, by inspecting `h.all_members` and observing that the ratio `fTsumwx/fEntries`. This yields exactly the same result.\r\nNot sure how much help this would be for anyone, they are just simple observations I made...",
+        "createdAt":"2023-10-28T21:11:55Z",
+        "number":7413186
+       },
+       {
+        "author":{
+         "login":"jpivarski"
+        },
+        "body":"To get underflow and overflow, set the `flow=True` flag in `h.values(flow=True)` and `h.variances(flow=True)`. I don't remember whether the `to_numpy` method also has this flag.",
+        "createdAt":"2023-10-29T00:05:06Z",
+        "number":7413610
+       }
+      ],
+      "totalCount":4
+     }
+    }
+   ],
+   "totalCount":1
+  },
+  "createdAt":"2023-10-27T20:56:00Z",
+  "number":1011,
+  "title":"Getting access to fit function from histogram in root file",
+  "url":"https://github.com/scikit-hep/uproot5/discussions/1011"
+ },
+ {
+  "author":{
+   "login":"ivoschulthess"
+  },
+  "body":"Good afternoon everyone,\r\n\r\nI need help accessing the subbranches or leaves of a ROOT file. It is a problem that I have never encountered before. I uploaded the file (one of many) here: [https://github.com/ivoschulthess/uprootProblem/blob/main/datafile.root](https://github.com/ivoschulthess/uprootProblem/blob/main/datafile.root).\r\n\r\nI am not very used to ROOT itself, but to look and access the data with ROOT, I can do the following:\r\n```\r\nroot [0] TFile *_file0 = TFile::Open(\"datafile.root\")\r\nroot [1] TTree *tree = (TTree*)_file0->Get(\"Neutron Detector\")\r\nroot [2] tree->Print()\r\n******************************************************************************\r\n*Tree    :Neutron Detector: Event \"Neutron Detector\", ID 4                         *\r\n*Entries :        1 : Total =           10078 bytes  File  Size =      10094 *\r\n*        :          : Tree compression factor =   1.00                       *\r\n******************************************************************************\r\n*Br    0 :CDT0      : nCDT0/I:CDT0[nCDT0]/i                                  *\r\n*Entries :        1 : Total  Size=       8868 bytes  File Size  =       8291 *\r\n*Baskets :        1 : Basket Size=      32000 bytes  Compression=   1.00     *\r\n*............................................................................*\r\n*Br    1 :CDT1      : nCDT1/I:CDT1[nCDT1]/i                                  *\r\n*Entries :        1 : Total  Size=        784 bytes  File Size  =        207 *\r\n*Baskets :        1 : Basket Size=      32000 bytes  Compression=   1.00     *\r\n*............................................................................*\r\nroot [3] tree->Draw(\"CDT0.CDT0\")\r\n```\r\nThis gives me the tree information and draws a histogram of the branch \"CDT0.CDT0\". \r\n\r\nIf I try to do the same thing with uproot (5.0.7) using Python 3.11.5, I encounter the following problem:\r\n```\r\nf = uproot.open('datafile.root')\r\ntree = f['Neutron Detector;1']\r\n\r\n# this gives: ['CDT0', 'CDT1']\r\ntree.keys()\r\n\r\n# this gives: []\r\ntree['CDT0'].keys()\r\n\r\n# this gives \"NameError: name 'nCDT0' is not defined\"\r\ntree.show()\r\n\r\n# this gives me a hint that also uproot sees the subbranches / leaves, e.g.\r\n# 'fName': 'CDT0',\r\n# 'fTitle': 'nCDT0/I:CDT0[nCDT0]/i',\r\n# 'fLeaves': <TObjArray of 2 items at 0x7f5be9ad08d0>,\r\ntree['CDT0'].all_members\r\n\r\n```\r\nSame thing happens when trying to access the other branch CDT1. I tried various things to access the content but it always gives me nothing or an error.  It seems uproot does not recognize the leaves properly. \r\n\r\nDo you have an idea what the problem is or do you know other ways to access the data? \r\n\r\nThanks in advance for your help and advice. \r\n\r\nCheers,\r\nIvo",
+  "comments":{
+   "nodes":[
+    {
+     "author":{
+      "login":"jpivarski"
+     },
+     "body":"There does seem to be something wrong: just trying to look at the interpretation of `tree[\"CDT0\"]` causes an exception inside of Uproot.\r\n\r\n```python\r\n>>> tree[\"CDT0\"].interpretation\r\nTraceback (most recent call last):\r\n  File \"<stdin>\", line 1, in <module>\r\n  File \"/home/jpivarski/irishep/uproot5/src/uproot/behaviors/TBranch.py\", line 1935, in interpretation\r\n    self._interpretation = uproot.interpretation.identify.interpretation_of(\r\n  File \"/home/jpivarski/irishep/uproot5/src/uproot/interpretation/identify.py\", line 407, in interpretation_of\r\n    _leaf_to_dtype(leaf, getdims=True).newbyteorder(\">\"),\r\n  File \"/home/jpivarski/irishep/uproot5/src/uproot/interpretation/identify.py\", line 69, in _leaf_to_dtype\r\n    dims = tuple(eval(m.group(2).replace(\"][\", \", \")))\r\n  File \"<string>\", line 1, in <module>\r\nNameError: name 'nCDT0' is not defined\r\n```\r\n\r\n(Which is true: there is no _TBranch_ named `\"nCDT0\"`.) But I can't say for sure that the file is correctly formatted. At least, I don't know how to interpret it.\r\n\r\nFrom ROOT's own `tree->Print()`, it doesn't have sub-branches within branches `tree[\"CDT0\"]` and `tree[\"CDT1\"]`; they each have two leaves (class TLeaf). It's unusual for a ROOT TBranch to have multiple TLeaves (these days), but not problematic. Uproot interprets TBranches, including nested sub-TBranches, as separate arrays and a TBranch with multiple TLeafs as a NumPy [structured array](https://numpy.org/doc/stable/user/basics.rec.html). The choice of NumPy structure is mirroring the internal layout of the data: TBranches are stored in separate buffers, whereas a TBranch with multiple TLeafs are interleaved, like a structured array (\"array of structs\").\r\n\r\nThe title of the TBranches are both `\"nCDT1/I:CDT1[nCDT1]/i\"`, which is what's giving Uproot a hard time. Interpreted literally, it would mean that the first leaf has type `np.uint32` (unsigned int) and the second leaf is a variable number of `np.int32` (int) values\u2014specifically, the number given by the first leaf. We can also see it this way:\r\n\r\n```python\r\n>>> tree[\"CDT0\"].member(\"fLeaves\")[0].member(\"fTitle\")\r\n'nCDT0'\r\n>>> tree[\"CDT0\"].member(\"fLeaves\")[1].member(\"fTitle\")\r\n'CDT0[nCDT0]'\r\n```\r\n\r\nThat would be possible for branches, which are not interleaved, because the counter can have a different number of values than the counted. Specifically, there's one integer for the counter and who-knows-how-many integers for the counted. Data specified by multiple TLeafs, however, are interleaved\u2014there has to be exactly as many of each.\r\n\r\nAnd yet, that seems to be exactly what this is saying. If I avoid Uproot's own interpretation and look at it through each TBasket's raw bytes,\r\n\r\n```python\r\n>>> tree[\"CDT0\"].num_baskets\r\n1\r\n>>> tree[\"CDT0\"].basket(0).data.view(\">i4\")\r\narray([2048,    0,    0, ...,    0,    0,    0], dtype='>i4')\r\n\r\n>>> tree[\"CDT1\"].num_baskets\r\n1\r\n>>> tree[\"CDT1\"].basket(0).data.view(\">i4\")\r\narray([       27,  53753945, 100000000, 100000000,         0,         0,\r\n               0,         5,         1,        -1,        -1,        -1,\r\n              -1,        -1,        -1,        -1,        -1,  51338476,\r\n         2431479,      2756,      5420,       332,         0,  44542698,\r\n         7819608,   1200644,    215180,      6575], dtype='>i4')\r\n```\r\n\r\nI see that the number of `np.int32` values (`\">i4\"` is just asking for `np.int32` with big-endian byte order) is equal to the first value minus one. The `tree[\"CDT0\"]` array has 2049 integers, and the first one, `2048`, is specifying the size. The `tree[\"CDT1\"]` array has 28 integers, and the first one, `27`, is specifying the size.\r\n\r\nSo this kind of multi-TLeaf TBranch is interleaved but not equal-sized, so it can't be interpreted as a NumPy structured array. I don't know what to make of it.\r\n\r\nHopefully, though, this gives you a way to work with your data. I can't add the above to Uproot because I don't know how it generalizes, but it should work for your specific problem.",
+     "createdAt":"2023-11-16T20:11:25Z",
+     "number":7592159,
+     "replies":{
+      "nodes":[
+       {
+        "author":{
+         "login":"ivoschulthess"
+        },
+        "body":"Thanks a lot. \r\nThis is perfect and allows me to work with the data. \r\n\r\nTo give some context and maybe help others who are searching for a solution with the same question: The ROOT files are produced by the data acquisition system \"MIDAS\" which is an acronym for Maximum Integrated Data Acquisition System. It was developed by PSI and Triumf. ",
+        "createdAt":"2023-11-16T21:12:33Z",
+        "number":7592620
+       },
+       {
+        "author":{
+         "login":"agoose77"
+        },
+        "body":"If you still have access to the raw MIDAS data, I wrote a MIDAS decoder that leverages Awkward Forth. This does the interpretation and row\u2192columnar conversion in one step, which is convenient. I am not sure what state it's in; I fernet-encrypted my test data and lost the key (I'm judging past @agoose77 too!), but very little has changed in the parts of Awkward Array that it uses since then. It might not be relevant: the word MIDAS seems to mean different things to different people, but for my group it was the MIDAS tape-server data.\r\n\r\nhttps://github.com/agoose77/midas-tape",
+        "createdAt":"2023-11-17T00:04:41Z",
+        "number":7593661
+       }
+      ],
+      "totalCount":2
+     }
+    }
+   ],
+   "totalCount":1
+  },
+  "createdAt":"2023-11-16T13:40:18Z",
+  "number":1030,
+  "title":"Problem accessing subbranches and/or leaves",
+  "url":"https://github.com/scikit-hep/uproot5/discussions/1030"
+ },
+ {
+  "author":{
+   "login":"tomeichlersmith"
+  },
+  "body":"I am interested in processing a O(2 GB) file using `uproot.iterate` rather than loading the full array into memory. I want to do this because I would like to process many files in parallel, but do not have the required memory to load the entire contents of each file into memory all at once. This led me down the rabbit hole of investigating the memory consumption of a test script where I noticed some odd behavior. While the memory used when using `uproot.iterate` is significantly lower than the memory used when loading the entire file (2.5GB compared to >6GB), it does not have the shape I would expect - it continuously increases until the entire file is closed. I know from reading https://github.com/scikit-hep/uproot5/discussions/926 that using a step size of a certain memory unit is complicated to interpret, but I'm wondering\r\n\r\n- Is this monotonically increasing behavior expected/understood? What is the explanation?\r\n- If so, is there a way I can estimate the actual memory usage? (or the inverse problem, how to best select a `step_size` to keep the process analyzing a file under a certain soft memory limit).\r\n\r\nBelow, I have uploaded the memory-usage vs time plots as generated by [mprof](https://pypi.org/project/memory-profiler/). I am using awkward 2.4.5 and uproot 5.0.12. I copied my test script for reference - the argument to the test script refers to the function that is run (and thus profiled).\r\n\r\n### Data Shape Complexities\r\nNot sure if these are pertinent, but I think all of the details are helpful when talking about memory usage.\r\n- I _am_ only selecting certain branches of the TTree I am loading (as can be seen in the test script).\r\n- One of these branches (`HcalSimHits`) is doubly-ragged (it is a variable length array whose elements have variable length arrays as members), one of these branches ('EcalRecHits`) is singly-ragged (it is a variable length array), and the others are not ragged (one value per entry in the tree).\r\n- The objects in these branches originated as C++ classes that were serialized in a C++/ROOT framework.\r\n\r\n## Runs for Reference\r\nFirst, (for context), I'd like to show some plots where I _don't_ use `uproot.iterate` so we can have them as reference when seeing how `uproot.iterate` behaves.\r\n\r\nJust have numpy generate large chunks\r\n```python\r\ndef np_generate_chunks():\r\n    for i in range(10):\r\n        yield np.full(25_000_000, 1, dtype=np.int32)\r\n\r\n\r\n@profile\r\ndef numpy():\r\n    for events in np_generate_chunks():\r\n        process(events)\r\n```\r\n![numpy](https://github.com/scikit-hep/uproot5/assets/31970302/1de86d8e-3d89-423e-92a2-4c55fd3e3504)\r\n\r\nHave uproot load entire file\r\n```python\r\ndef uproot_whole_file():\r\n    with uproot.open('test.root') as f:\r\n        events = f['LDMX_Events'].arrays(**selection_kw)\r\n        process(events)\r\n```\r\n![uproot_whole_file](https://github.com/scikit-hep/uproot5/assets/31970302/e6e4c729-6f77-4219-b4aa-872661a18a14)\r\n\r\n## Tests\r\nNaive solution from docs\r\n```python\r\ndef uproot_file_iterate():\r\n    for events in uproot.iterate('test.root:LDMX_Events', **selection_kw):\r\n        process(events)\r\n```\r\n![uproot_file_iterate](https://github.com/scikit-hep/uproot5/assets/31970302/913bcd67-5ce2-4bd4-b999-69e633d8752e)\r\n\r\nDifferent attempt from docs\r\n```python\r\ndef uproot_tree_iterate():\r\n    with uproot.open('test.root') as f:\r\n        for events in f['LDMX_Events'].iterate(**selection_kw):\r\n            process(events)\r\n```\r\n![uproot_tree_iterate](https://github.com/scikit-hep/uproot5/assets/31970302/a38805c8-064b-4182-87c9-f7fb94ab29c1)\r\n\r\nTry answer from https://github.com/scikit-hep/uproot5/discussions/648\r\n```python\r\ndef uproot_tree_iterate_no_object_cache():\r\n    with uproot.open('test.root', object_cache=None) as f:\r\n        for events in f['LDMX_Events'].iterate(**selection_kw):\r\n            process(events)\r\n```\r\n![uproot_tree_iterate_no_object_cache](https://github.com/scikit-hep/uproot5/assets/31970302/ecf66669-7190-48e1-acb0-fb3b93216d20)\r\n\r\nForce a specific step size that (I think) should keep the chunk-in-memory smaller than the default.\r\n```python\r\ndef uproot_iterate_small_chunk():\r\n    for events in uproot.iterate('test.root:LDMX_Events', step_size=10000, **selection_kw):\r\n        process(events)\r\n```\r\n![uproot_iterate_small_chunk](https://github.com/scikit-hep/uproot5/assets/31970302/c87903e5-95b5-4775-8a38-f01f9b33d8ab)\r\n\r\n\r\n<details>\r\n  <summary>Full test.py Script</summary>\r\n\r\n```python\r\n\r\nimport numpy as np\r\nimport uproot\r\nimport time\r\n\r\nselection_kw = dict(\r\n    filter_name = [\r\n        'PEFF**',\r\n        'HcalSimHits**',\r\n        'EcalRecHits**',\r\n        'EventHeader**'\r\n    ]\r\n)\r\n\r\n\r\n@profile\r\ndef process(events):\r\n    time.sleep(1)\r\n\r\n\r\n@profile\r\ndef uproot_whole_file():\r\n    \"\"\"as a bench mark, lets just load the whole file into memory\"\"\"\r\n    with uproot.open('test.root') as f:\r\n        events = f['LDMX_Events'].arrays(**selection_kw)\r\n        process(events)\r\n\r\n\r\n@profile\r\ndef uproot_file_iterate():\r\n    \"\"\"naive solution, first thing I tried after looking at docs\"\"\"\r\n    for events in uproot.iterate('test.root:LDMX_Events', **selection_kw):\r\n        process(events)\r\n\r\n\r\n@profile\r\ndef uproot_tree_iterate():\r\n    \"\"\"noticed docs have an iterate method on the tree itself, try that\"\"\"\r\n    with uproot.open('test.root') as f:\r\n        for events in f['LDMX_Events'].iterate(**selection_kw):\r\n            process(events)\r\n\r\n\r\n@profile\r\ndef uproot_tree_iterate_no_object_cache():\r\n    \"\"\"saw this option in the discussion\r\n    https://github.com/scikit-hep/uproot5/discussions/648\r\n    \"\"\"\r\n    with uproot.open('test.root', object_cache=None) as f:\r\n        for events in f['LDMX_Events'].iterate(**selection_kw):\r\n            process(events)\r\n\r\n\r\n@profile\r\ndef uproot_iterate_small_chunk():\r\n    \"\"\"force a really small chunk to see an extreme\"\"\"\r\n    for events in uproot.iterate('test.root:LDMX_Events', step_size=10000, **selection_kw):\r\n        process(events)\r\n\r\n\r\ndef np_generate_chunks():\r\n    for i in range(10):\r\n        yield np.full(25_000_000, 1, dtype=np.int32)\r\n\r\n\r\n@profile\r\ndef numpy():\r\n    \"\"\"another benchmark, just have numpy generate ~100MB chunks for me\"\"\"\r\n    for events in np_generate_chunks():\r\n        process(events)\r\n\r\n\r\ndef main():\r\n    import sys\r\n    globals()[sys.argv[1]]()\r\n\r\nif __name__ == '__main__':\r\n    main()\r\n```\r\n</details>",
+  "comments":{
+   "nodes":[
+    {
+     "author":{
+      "login":"agoose77"
+     },
+     "body":"The default `uproot` source for reading files from disk uses memory mapping (`mmap`). Memory mapping is useful to avoid an extra copy of the data when reading, to share (re-use) memory between processes, and to improve performance of random access (c.f. https://stackoverflow.com/a/6383253). However, it has some drawbacks; namely that the OS is responsible for managing the memory (and also, the cache is populated via page faulting). In this case, I think the behaviour that you're seeing is a direct consequence of the kernel caching memory pages, and choosing not to free them (c.f. https://stackoverflow.com/a/1972889). \r\n\r\nIf you want to avoid this caching, you can open the file yourself and pass the file-handle to `uproot`. This bypasses `np.memmap`, and instead performs single-threaded Python reads. This may be slower (no caching, more copies!), but the OS memory manager should be more aggressive in freeing memory pages.\r\n\r\n",
+     "createdAt":"2023-11-22T17:39:37Z",
+     "number":7644946,
+     "replies":{
+      "nodes":[
+       {
+        "author":{
+         "login":"tomeichlersmith"
+        },
+        "body":"Using the file-handle directly to bypass `mmap` seems to have a similar effect as the fsspec source mentioned by @lobis although it is back to the time-performance from before. This reminds me that I'm reading this file over NFS and so trusting the times I'm showing here is not a good idea since I haven't logged whether NFS mount is warm or cold.\r\n\r\n```python\r\ndef pyhandle():\r\n    with open('test.root','rb') as f:\r\n        with uproot.open(f) as rf:\r\n            for events in rf['LDMX_Events'].iterate(**selection_kw):\r\n                process(events)\r\n```\r\n![pyhandle](https://github.com/scikit-hep/uproot5/assets/31970302/307fe065-04de-4048-8991-6a85dd1a7ca1)\r\n",
+        "createdAt":"2023-11-22T19:36:29Z",
+        "number":7645808
+       }
+      ],
+      "totalCount":1
+     }
+    },
+    {
+     "author":{
+      "login":"lobis"
+     },
+     "body":"An alternative to modifying your code to pass the file-handle would be to use the `v5.2.0rc1` pre-release. In the next release `fsspec` will become a required dependency and it will also become the default uproot source for most cases, currently this also includes local filesystem access. This can also be tested in the latest release (`5.1.2`) by passing the `handler=uproot.source.fsspec.FSSpecSource` to the iterate/open method. (The default source for local files in that version would be `uproot.source.file.MemmapSource`).\r\n\r\nI would be really interested in seeing the difference in performance between the two sources!",
+     "createdAt":"2023-11-22T19:12:17Z",
+     "number":7645656,
+     "replies":{
+      "nodes":[
+       {
+        "author":{
+         "login":"tomeichlersmith"
+        },
+        "body":"Interestingly, it does look to behave better on the memory side, but @agoose77 is correct, I do observe the reading take measurably longer than before (by ~30% - from ~33s reading to ~43s reading).\r\n\r\n```python\r\ndef uproot_fsspec_source():\r\n    with uproot.open('test.root', handler=uproot.source.fsspec.FSSpecSource) as f:\r\n        for events in f['LDMX_Events'].iterate(**selection_kw):\r\n            process(events)\r\n```\r\n![uproot_fsspec_source](https://github.com/scikit-hep/uproot5/assets/31970302/effa9e3c-3770-4422-b40a-ded64c1fab2f)\r\n",
+        "createdAt":"2023-11-22T19:29:53Z",
+        "number":7645766
+       },
+       {
+        "author":{
+         "login":"lobis"
+        },
+        "body":"Thanks for the plot!\r\n\r\nI'm wondering if we can use `fsspec` to behave as `uproot.source.file.MemmapSource`.\r\n\r\nIn your case you are using fsspec with the loca file protocol (same as setting `file://test.root`).\r\n\r\nYou could also load the whole file into memory\r\n\r\n``` \r\nwith open(\"test.root\", \"rb\") as f:\r\n        contents = f.read()\r\n        with fsspec.open(\"memory://test.root\", \"wb\") as ff:\r\n            ff.write(contents)\r\n```\r\n\r\nand then read it with uproot using fsspec (passing `memory://test.root` instead of `test.root` to uproot).\r\n\r\nI'm guessing this would have the fastest read performance but obviously you would need to have the whole file in memory and also you need to read it whole once to load it.\r\n\r\nI guess it should be possible to use fsspec to behave as a memory mapped file. I tried protocol chaining (`memory::file`, `file::memory`) but couldn't make it work. Perhaps @martindurant can comment on this.",
+        "createdAt":"2023-11-22T20:02:02Z",
+        "number":7645968
+       },
+       {
+        "author":{
+         "login":"martindurant"
+        },
+        "body":"There is no \"memory cache\" filesystem - they all save to local disk. The memoryFS doesn't expect to pull its data from any other FS for those kinds of URL chains.\r\n\r\nThe bytes caching mechanism (i.e., in-file) has one mode which allows to load a whole file prospectively into memory with `open(cache_type=\"all\")`, but this only applies to subclasses of AbstractBufferedFile, not ones that have native implementations such as local files.\r\n",
+        "createdAt":"2023-11-23T17:58:51Z",
+        "number":7654168
+       }
+      ],
+      "totalCount":3
+     }
+    }
+   ],
+   "totalCount":2
+  },
+  "createdAt":"2023-11-22T16:15:26Z",
+  "number":1041,
+  "title":"Memory consumption during `uproot.iterate`",
+  "url":"https://github.com/scikit-hep/uproot5/discussions/1041"
+ },
+ {
+  "author":{
+   "login":"tomeichlersmith"
+  },
+  "body":"When I try to use `uproot.dask` out-of-the-box (so to speak), I see an error at `.compute()` time. This error seems to allude to the form mapping and so I am curious if that part of `uproot.dask` is required (or at least required for this type of input file).\r\n\r\nI am using uproot 5.2.0rc1 and awkward 2.5.0.\r\n\r\n```python\r\n\r\nIn [1]: import uproot\r\n\r\nIn [2]: events = uproot.dask('test.root:LDMX_Events')\r\n\r\nIn [3]: events['EcalRecHits_eat.energy_'].compute()\r\n---------------------------------------------------------------------------\r\nKeyError                                  Traceback (most recent call last)\r\nCell In[3], line 1\r\n----> 1 events['EcalRecHits_eat.energy_'].compute()\r\n\r\n... removed functions from call stack internal to dask ...\r\n\r\nFile ~/.local/lib/python3.11/site-packages/uproot/_dask.py:1039, in _UprootRead.__call__(self, i_start_stop)\r\n   1036 def __call__(self, i_start_stop) -> AwkArray:\r\n   1037     i, start, stop = i_start_stop\r\n-> 1039     return self.read_tree(self.ttrees[i], start, stop)\r\n\r\nFile ~/.local/lib/python3.11/site-packages/uproot/_dask.py:912, in UprootReadMixin.read_tree(self, tree, start, stop)\r\n    906 container = {}\r\n    907 for buffer_key, dtype in self.expected_form.expected_from_buffers(\r\n    908     buffer_key=self.form_mapping_info.buffer_key\r\n    909 ).items():\r\n    910     # Which key(s) does this buffer require. This code permits the caller\r\n    911     # to require multiple keys to compute a single buffer.\r\n--> 912     keys_for_buffer = self.form_mapping_info.keys_for_buffer_keys(\r\n    913         frozenset({buffer_key})\r\n    914     )\r\n    915     # If reading this buffer loads a permitted key, read from the tree\r\n    916     # We might not have _all_ keys if e.g. buffer A requires one\r\n    917     # but not two of the keys required for buffer B\r\n    918     if all(k in self.common_keys for k in keys_for_buffer):\r\n\r\nFile ~/.local/lib/python3.11/site-packages/uproot/_dask.py:826, in TrivialFormMappingInfo.keys_for_buffer_keys(self, buffer_keys)\r\n    824     form_key, attribute = buffer_key.rsplit(\"-\", maxsplit=1)\r\n    825     # Identify key from form_key\r\n--> 826     keys.add(self._form_key_to_key[form_key])\r\n    827 return frozenset(keys)\r\n\r\nKeyError: 'None'\r\n```\r\n\r\nA non-dask read looks normal to me\r\n```python\r\n\r\nIn [1]: import uproot\r\n\r\nIn [2]: events = uproot.open('test.root:LDMX_Events')['EcalRecHits_eat.energy_'].array()\r\n\r\nIn [3]: events\r\nOut[3]: <Array [[4.31, 5.47, 42.7, ..., 3.55, 46], ...] type='608027 * var * float32'>\r\n```\r\n\r\nAnd I get a different error if I try to use dask without awkward.\r\n```python\r\nIn [1]: import uproot\r\n\r\nIn [2]: events = uproot.dask('test.root:LDMX_Events', library='np')\r\n---------------------------------------------------------------------------\r\nAssertionError                            Traceback (most recent call last)\r\nCell In[2], line 1\r\n----> 1 events = uproot.dask('test.root:LDMX_Events', library='np')\r\n\r\nFile ~/.local/lib/python3.11/site-packages/uproot/_dask.py:213, in dask(files, filter_name, filter_typename, filter_branch, recursive, full_paths, step_size, steps_per_file, library, ak_add_doc, custom_classes, allow_missing, open_files, form_mapping, **options)\r\n    211 if library.name == \"np\":\r\n    212     if open_files:\r\n--> 213         return _get_dask_array(\r\n    214             files,\r\n    215             filter_name,\r\n    216             filter_typename,\r\n    217             filter_branch,\r\n    218             recursive,\r\n    219             full_paths,\r\n    220             step_size,\r\n    221             custom_classes,\r\n    222             allow_missing,\r\n    223             real_options,\r\n    224             interp_options,\r\n    225             steps_per_file,\r\n    226         )\r\n    227     else:\r\n    228         return _get_dask_array_delay_open(\r\n    229             files,\r\n    230             filter_name,\r\n   (...)\r\n    239             steps_per_file,\r\n    240         )\r\n\r\nFile ~/.local/lib/python3.11/site-packages/uproot/_dask.py:611, in _get_dask_array(files, filter_name, filter_typename, filter_branch, recursive, full_paths, step_size, custom_classes, allow_missing, real_options, interp_options, steps_per_file)\r\n    608 assert entry_step >= 1\r\n    610 for key in common_keys:\r\n--> 611     dt = ttrees[0][key].interpretation.numpy_dtype\r\n    612     if dt.subdtype is None:\r\n    613         inner_shape = ()\r\n\r\nFile ~/.local/lib/python3.11/site-packages/uproot/interpretation/__init__.py:57, in Interpretation.numpy_dtype(self)\r\n     52 @property\r\n     53 def numpy_dtype(self):\r\n     54     \"\"\"\r\n     55     The ``numpy.dtype`` to use to put objects of this type in a NumPy array.\r\n     56     \"\"\"\r\n---> 57     raise AssertionError\r\n\r\nAssertionError: \r\n\r\n```",
+  "comments":{
+   "nodes":[
+    {
+     "author":{
+      "login":"agoose77"
+     },
+     "body":"No, form remapping is not required. It might be that we have a bug in the trivial case \u2014 I'll take a look.",
+     "createdAt":"2023-11-28T16:39:44Z",
+     "number":7694522,
+     "replies":{
+      "nodes":[
+       {
+        "author":{
+         "login":"tomeichlersmith"
+        },
+        "body":"I'm unsure if this information is necessary, but here is more detail on the branch I am trying to access.\r\n\r\nI'm trying to access the member of a class that was serialized within a `std::vector` in each entry of the tree.\r\n```python\r\nIn [1]: import uproot\r\n\r\nIn [2]: tree = uproot.open('test.root:LDMX_Events')\r\n\r\nIn [3]: tree['EcalRecHits_eat'].show()\r\nname                 | typename                 | interpretation                \r\n---------------------+--------------------------+-------------------------------\r\nEcalRecHits_eat      | vector<ldmx::EcalHit>    | AsGroup(<TBranchElement 'EcalR\r\nEcalRecHits_eat.id_  | int32_t[]                | AsJagged(AsDtype('>i4'))\r\nEcalRecHits_eat.a... | float[]                  | AsJagged(AsDtype('>f4'))\r\nEcalRecHits_eat.e... | float[]                  | AsJagged(AsDtype('>f4'))\r\nEcalRecHits_eat.t... | float[]                  | AsJagged(AsDtype('>f4'))\r\nEcalRecHits_eat.x... | float[]                  | AsJagged(AsDtype('>f4'))\r\nEcalRecHits_eat.y... | float[]                  | AsJagged(AsDtype('>f4'))\r\nEcalRecHits_eat.z... | float[]                  | AsJagged(AsDtype('>f4'))\r\nEcalRecHits_eat.i... | bool[]                   | AsJagged(AsDtype('bool'))\r\n```",
+        "createdAt":"2023-11-28T17:56:07Z",
+        "number":7695283
+       },
+       {
+        "author":{
+         "login":"tomeichlersmith"
+        },
+        "body":"I also should add that I can currently load (and `.compute`) the same file using coffea's wrapper of `uproot.dask` which I think does do some `form_mapping` but I cannot confirm that yet (perhaps you are more familiar).\r\n\r\nhttps://github.com/CoffeaTeam/coffea/blob/5f7651aff69cf4fb19e5c7cbcb18be5fe9c89a91/src/coffea/nanoevents/factory.py#L322-L353",
+        "createdAt":"2023-11-28T18:01:42Z",
+        "number":7695341
+       }
+      ],
+      "totalCount":2
+     }
+    }
+   ],
+   "totalCount":1
+  },
+  "createdAt":"2023-11-28T15:28:07Z",
+  "number":1047,
+  "title":"Is `form_mapping` required for `uproot.dask`?",
+  "url":"https://github.com/scikit-hep/uproot5/discussions/1047"
+ },
+ {
+  "author":{
+   "login":"tomeichlersmith"
+  },
+  "body":"I have a TTree with branches that are all the same C++ class and I would like to read all of them into memory. I was able to generate a small enough file which I've just uploaded here if you wish to play with it: [test.root.tar.gz](https://github.com/scikit-hep/uproot5/files/13602809/test.root.tar.gz)\r\n\r\nThis is where I'm at version wise.\r\n```\r\nawkward==2.5.0\r\nawkward-cpp==26\r\nnumpy==1.21.5\r\npandas==1.5.2\r\nuproot==5.1.2\r\n```\r\n\r\nFor those following along at home, I've loaded the TTree from the example file with `uproot` by doing\r\n```python\r\nt = uproot.open({'test.root': 'performance/by_event'})\r\n```\r\nThe shape of my TTree is pretty simple. As mentioned, each branch (except a completion-flag) is the same C++ class and so there is a lot of repetition.\r\n```python\r\nIn [3]: t.show()                                                                                                                                                                                                                              \r\nname                 | typename                 | interpretation                                                                                                                                                                              \r\n---------------------+--------------------------+-------------------------------                                                                                                                                                              \r\ncompleted            | bool                     | AsDtype('bool')\r\n__ALL__              | framework::performanc... | AsGroup(<TBranchElement '__...\r\n__ALL__/start_time_  | int64_t                  | AsDtype('>i8')\r\n__ALL__/duration_    | double                   | AsDtype('>f8')\r\nMultiTry             | framework::performanc... | AsGroup(<TBranchElement 'Mu...\r\nMultiTry/start_time_ | int64_t                  | AsDtype('>i8')\r\nMultiTry/duration_   | double                   | AsDtype('>f8')\r\nRecon                | framework::performanc... | AsGroup(<TBranchElement 'Re...\r\nRecon/start_time_    | int64_t                  | AsDtype('>i8')\r\nRecon/duration_      | double                   | AsDtype('>f8')\r\n```\r\n\r\nBoth the `np` and `ak` libraries only bring two of the six branches into memory.\r\n```python\r\nIn [4]: t.arrays(library='ak').type.show()\r\n4 * {\r\n    completed: bool,\r\n    start_time_: int64,\r\n    duration_: float64\r\n}\r\n\r\nIn [5]: t.arrays(library='np')\r\nOut[5]: \r\n{'completed': array([ True, False,  True,  True]),\r\n 'start_time_': array([1701965077841635851, 1701965077856929667, 1701965077857039110,\r\n        1701965077857187765]),\r\n 'duration_': array([7.22315e-04, 5.76170e-05, 8.84370e-05, 4.10540e-05])}\r\n```\r\n\r\nThe `pd` library fails completely due to a key error.\r\n```python\r\nIn [6]: t.arrays(library='pd')\r\n---------------------------------------------------------------------------\r\nKeyError                                  Traceback (most recent call last)\r\nCell In[6], line 1\r\n----> 1 t.arrays(library='pd')\r\n\r\nFile ~/.local/lib/python3.10/site-packages/uproot/behaviors/TBranch.py:904, in HasBranches.arrays(self, expressions, cut, filter_name, filter_typename, filter_branch, aliases, language, entry_start, entry_stop, decompression_executor, interpretation_executor, array_cache, library, ak_add_doc, how)\r\n    897 del arrays\r\n    899 expression_context = [\r\n    900     (e, c) for e, c in expression_context if c[\"is_primary\"] and not c[\"is_cut\"]\r\n    901 ]\r\n    903 return _ak_add_doc(\r\n--> 904     library.group(output, expression_context, how), self, ak_add_doc\r\n    905 )\r\n\r\nFile ~/.local/lib/python3.10/site-packages/uproot/interpretation/library.py:872, in Pandas.group(self, arrays, expression_context, how)\r\n    870 elif uproot._util.isstr(how) or how is None:\r\n    871     arrays, names = _pandas_only_series(pandas, arrays, expression_context)\r\n--> 872     return _pandas_memory_efficient(pandas, arrays, names)\r\n    874 else:\r\n    875     raise TypeError(\r\n    876         f\"for library {self.name}, how must be tuple, list, dict, str (for \"\r\n    877         \"pandas.merge's 'how' parameter, or None (for one or more\"\r\n    878         \"DataFrames without merging)\"\r\n    879     )\r\n\r\nFile ~/.local/lib/python3.10/site-packages/uproot/interpretation/library.py:798, in _pandas_memory_efficient(pandas, series, names)\r\n    796             out = series[name].to_frame(name=name)\r\n    797     else:\r\n--> 798         out[name] = series[name]\r\n    799     del series[name]\r\n    800 if out is None:\r\n\r\nKeyError: 'start_time_'\r\n```\r\n\r\nTo me, this looks like an issue with how the branch-name-shortening is handling branches of similar/same types. It doesn't actually struggle with loading the data since I can instruct the `library='np'` option to stop worrying about the branch names and in this case we do see all of the branches.\r\n```python\r\nIn [7]: t.arrays(library='np', how=tuple)\r\nOut[7]: \r\n(array([ True, False,  True,  True]),\r\n array([1701965077841635851, 1701965077856929667, 1701965077857039110,\r\n        1701965077857187765]),\r\n array([7.22315e-04, 5.76170e-05, 8.84370e-05, 4.10540e-05]),\r\n array([1701965077841635851, 1701965077856929667, 1701965077857039110,\r\n        1701965077857187765]),\r\n array([7.22315e-04, 5.76170e-05, 8.84370e-05, 4.10540e-05]),\r\n array([1701965077841635851, 1701965077856929667, 1701965077857039110,\r\n        1701965077857187765]),\r\n array([7.22315e-04, 5.76170e-05, 8.84370e-05, 4.10540e-05]))\r\n```\r\n\r\n### My questions are\r\n- Are there special keywords that I can pass to `arrays` to avoid this overwriting behavior? I imagine some intelligent use of `aliases` would allow me to remap the branch names (with `/`) to names that won't clash (i.e. without the `/`).\r\n- Is this a bug that could be resolved? Maybe fallback to un-shortened names if the shortened names clash?",
+  "comments":{
+   "nodes":[
+    {
+     "author":{
+      "login":"tomeichlersmith"
+     },
+     "body":"Without updating the `uproot` source, I can get around this issue by specifying the branches I wish to read with the `expressions` argument. For example,\r\n```python\r\nIn [14]: t.arrays(expressions=['__ALL__/duration_','MultiTry/duration_'], library='np')\r\nOut[14]: \r\n{'__ALL__/duration_': array([7.22315e-04, 5.76170e-05, 8.84370e-05, 4.10540e-05]),\r\n 'MultiTry/duration_': array([5.4085e-04, 5.5649e-05, 7.8560e-05, 3.5065e-05])}\r\n```\r\n\r\nWe can get exactly what I'm interested in if we ask for the base `TBranchElement` branches explicitly.\r\n```python\r\nIn [18]: t.arrays(expressions=[k for k in t.keys() if '/' not in k]).type.show()\r\n4 * {\r\n    completed: bool,\r\n    __ALL__: {\r\n        start_time_: int64,\r\n        duration_: float64\r\n    },\r\n    MultiTry: {\r\n        start_time_: int64,\r\n        duration_: float64\r\n    },\r\n    Recon: {\r\n        start_time_: int64,\r\n        duration_: float64\r\n    }\r\n}\r\n\r\nIn [19]: t.arrays(expressions=[k for k in t.keys() if '/' not in k], library='np')\r\nOut[19]: \r\n{'completed': array([ True, False,  True,  True]),\r\n '__ALL__': {'start_time_': array([1701965077841635851, 1701965077856929667, 1701965077857039110,\r\n         1701965077857187765]),\r\n  'duration_': array([7.22315e-04, 5.76170e-05, 8.84370e-05, 4.10540e-05])},\r\n 'MultiTry': {'start_time_': array([1701965077841635851, 1701965077856929667, 1701965077857039110,\r\n         1701965077857187765]),\r\n  'duration_': array([7.22315e-04, 5.76170e-05, 8.84370e-05, 4.10540e-05])},\r\n 'Recon': {'start_time_': array([1701965077841635851, 1701965077856929667, 1701965077857039110,\r\n         1701965077857187765]),\r\n  'duration_': array([7.22315e-04, 5.76170e-05, 8.84370e-05, 4.10540e-05])}}\r\n```\r\n\r\n<details>\r\n  <summary>`library='pd'` still errors out though</summary>\r\n\r\n```python\r\nIn [20]: t.arrays(expressions=[k for k in t.keys() if '/' not in k], library='pd')\r\n---------------------------------------------------------------------------\r\nValueError                                Traceback (most recent call last)\r\n<ipython-input-20-0272b5a4f214> in ?()\r\n----> 1 t.arrays(expressions=[k for k in t.keys() if '/' not in k], library='pd')\r\n\r\n~/.local/lib/python3.10/site-packages/uproot/behaviors/TBranch.py in ?(self, expressions, cut, filter_name, filter_typename, filter_branch, aliases, language, entry_start, entry_stop, decompression_executor, interpretation_executor, array_cache, library, ak_add_doc, how)\r\n    900             (e, c) for e, c in expression_context if c[\"is_primary\"] and not c[\"is_cut\"]\r\n    901         ]\r\n    902 \r\n    903         return _ak_add_doc(\r\n--> 904             library.group(output, expression_context, how), self, ak_add_doc\r\n    905         )\r\n\r\n~/.local/lib/python3.10/site-packages/uproot/interpretation/library.py in ?(self, arrays, expression_context, how)\r\n    868             return {_rename(name, c): arrays[name] for name, c in expression_context}\r\n    869 \r\n    870         elif uproot._util.isstr(how) or how is None:\r\n    871             arrays, names = _pandas_only_series(pandas, arrays, expression_context)\r\n--> 872             return _pandas_memory_efficient(pandas, arrays, names)\r\n    873 \r\n    874         else:\r\n    875             raise TypeError(\r\n\r\n~/.local/lib/python3.10/site-packages/uproot/interpretation/library.py in ?(pandas, series, names)\r\n    794                 out = pandas.Series(data=series[name]).to_frame(name=name)\r\n    795             else:\r\n    796                 out = series[name].to_frame(name=name)\r\n    797         else:\r\n--> 798             out[name] = series[name]\r\n    799         del series[name]\r\n    800     if out is None:\r\n    801         return pandas.DataFrame(data=series, columns=names)\r\n\r\n/usr/local/lib/python3.10/dist-packages/pandas/core/frame.py in ?(self, key, value)\r\n   3964             self._setitem_frame(key, value)\r\n   3965         elif isinstance(key, (Series, np.ndarray, list, Index)):\r\n   3966             self._setitem_array(key, value)\r\n   3967         elif isinstance(value, DataFrame):\r\n-> 3968             self._set_item_frame_value(key, value)\r\n   3969         elif (\r\n   3970             is_list_like(value)\r\n   3971             and not self.columns.is_unique\r\n\r\n/usr/local/lib/python3.10/dist-packages/pandas/core/frame.py in ?(self, key, value)\r\n   4119             self._set_item_mgr(key, arraylike)\r\n   4120             return\r\n   4121 \r\n   4122         if len(value.columns) != 1:\r\n-> 4123             raise ValueError(\r\n   4124                 \"Cannot set a DataFrame with multiple columns to the single \"\r\n   4125                 f\"column {key}\"\r\n   4126             )\r\n\r\nValueError: Cannot set a DataFrame with multiple columns to the single column __ALL__\r\n\r\n\r\n```\r\n\r\n</details>\r\n\r\n**This still leaves the question about if this is a bug or if this is expected/understood behavior.** I was expecting the results shown above to be the default behavior, but perhaps the implementation is too convoluted to do that?",
+     "createdAt":"2023-12-07T17:00:50Z",
+     "number":7791263,
+     "replies":{
+      "nodes":[
+       {
+        "author":{
+         "login":"tomeichlersmith"
+        },
+        "body":"A more complete answer which is shorter and a little more refined is\r\n```python\r\nt.arrays(expressions=t.keys(recursive=False))\r\n```\r\nfor `library='ak'` (the default) or `library='np'`, and\r\n```python\r\nt.arrays(expressions=t.keys(filter_typename=lambda tn: '::' not in tn), library='pd')\r\n```\r\nfor `library='pd'`.",
+        "createdAt":"2023-12-07T17:11:09Z",
+        "number":7791361
+       },
+       {
+        "author":{
+         "login":"tomeichlersmith"
+        },
+        "body":"I think the actual bug is the fact that uproot _silently_ ignores/overwrites certain branches when there is a name clash. Perhaps a warning can be printed or an exception thrown if there is a name clash? I cannot think of a situation where someone would want branches to be overwritten by sub-branches of another branch so I'd probably go for an exception.",
+        "createdAt":"2023-12-07T17:20:57Z",
+        "number":7791441
+       },
+       {
+        "author":{
+         "login":"jpivarski"
+        },
+        "body":"No, we don't want identical subbranch names to overwrite each other. From what I see of your debugging, it looks like the subbranch names are the same but they're under branches with different names. Usually, ROOT files are made with an option set that gives the subbranches fully qualified names (that is, if `start_time_` is under `__ALL__`, then it will be named `__ALL__.start_time_`). I think that choice is made by naming a branch with a trailing `.`: that's what tells ROOT to make fully qualified subbranch names.\r\n\r\nBut in the case that they aren't, then they ought to be distinguished. However, if someone uses the `.` to get fully qualified names, and we try to distinguish names by fully qualifying them, they would then be like `__ALL__.__ALL__.start_time_`. I don't know how we would detect whether the `.` option has been chosen, and it would be surprising behavior to have the extra qualification only turn on if there's a conflict. Not as surprising as losing a branch, though.\r\n\r\nDo you see where in the code the subbranches are being clobbered? I'd be fine with fully qualifying everything, even if some people get longer names than they want. (It's easier to work around unexpectedly long names than missing branches.) Do all of the names enter this `finalize` function? Are they among the `arrays` that are passed to `group`?\r\n\r\nhttps://github.com/scikit-hep/uproot5/blob/c5ff0619271725867d4cee5060a1c9db661cb39b/src/uproot/interpretation/library.py#L836-L886",
+        "createdAt":"2023-12-07T20:54:50Z",
+        "number":7793747
+       },
+       {
+        "author":{
+         "login":"tomeichlersmith"
+        },
+        "body":"I was unaware of the ability to alter how ROOT makes the subbranch names, that makes sense then to strip the redundant prefix (before the `/`) in the full path name.\r\n\r\nI do not see where in the code the subbranches are being clobbered, I expect (since I can see all of them when passing `how=tuple`), that the construction of the `dict` using the new names as keys is where this originates. Both NumPy and Awkward use the same procedure and don't check for clashes in the values returned by `_rename`. \r\n\r\nhttps://github.com/scikit-hep/uproot5/blob/c5ff0619271725867d4cee5060a1c9db661cb39b/src/uproot/interpretation/library.py#L874-L875\r\n\r\nThe new names are retrieved from the passed `expression_context` which has its own construction path.\r\n\r\nIn any case, since the origin of `expression_context` is compilcated _and_ there is another way to create branches that provides fully-specified names, I am ok with the current reading solution I was able to deduce and would just suggest that a check for clashes is inserted into the code above so that the user can be notified when deduced branch names are repeating themselves.",
+        "createdAt":"2023-12-07T21:24:20Z",
+        "number":7793942
+       },
+       {
+        "author":{
+         "login":"tomeichlersmith"
+        },
+        "body":"I do have access to how the TTree is written, so I updated it to fully-specify the sub-branch names. I'm just reporting back here on what that looks like with the uproot version I've been using above.\r\n\r\nThere is not overlapping of branches anymore (as expected)\r\n```python\r\nIn [15]: t.arrays().type.show()\r\n4 * {\r\n    completed: bool,\r\n    \"__ALL__.start_time_\": int64,\r\n    \"__ALL__.duration_\": float64,\r\n    \"MultiTry.start_time_\": int64,\r\n    \"MultiTry.duration_\": float64,\r\n    \"Recon.start_time_\": int64,\r\n    \"Recon.duration_\": float64\r\n}\r\n```\r\nThe names are longer, but there is the `/` character that can be used for shortening if desired.\r\n```python\r\nIn [14]: t.keys()\r\nOut[14]: \r\n['completed',\r\n '__ALL__.',\r\n '__ALL__./__ALL__.start_time_',\r\n '__ALL__./__ALL__.duration_',\r\n 'MultiTry.',\r\n 'MultiTry./MultiTry.start_time_',\r\n 'MultiTry./MultiTry.duration_',\r\n 'Recon.',\r\n 'Recon./Recon.start_time_',\r\n 'Recon./Recon.duration_']\r\n```\r\nSpecifically requesting the \"base\" branches like I did before offers (what I think) a more natural shape for the data but the sub-branches in this case still have the long names which can probably be fixed by renaming record fields via `ak.zip`.\r\n```python\r\nIn [13]: t.arrays(\r\n    ...:     expressions=t.keys(recursive=False),\r\n    ...:     ).type.show()\r\n4 * {\r\n    completed: bool,\r\n    \"__ALL__.\": {\r\n        \"__ALL__.start_time_\": int64,\r\n        \"__ALL__.duration_\": float64\r\n    },\r\n    \"MultiTry.\": {\r\n        \"MultiTry.start_time_\": int64,\r\n        \"MultiTry.duration_\": float64\r\n    },\r\n    \"Recon.\": {\r\n        \"Recon.start_time_\": int64,\r\n        \"Recon.duration_\": float64\r\n    }\r\n}\r\n```\r\n\r\n",
+        "createdAt":"2023-12-08T19:37:20Z",
+        "number":7802989
+       }
+      ],
+      "totalCount":5
+     }
+    },
+    {
+     "author":{
+      "login":"JacekHoleczek"
+     },
+     "body":"> Usually, ROOT files are made with an option set that gives the subbranches fully qualified names (...). I think that choice is made by naming a branch with a trailing `.`: (...)\r\n\r\nROOT never does it by default and it is not mandatory. If you want it, when creating a new branch, for some object which data members will be split into subbranches, you yourself have to explicitly set its name ending with a \"`.`\".\r\n\r\n> I don't know how we would detect whether the . option has been chosen, (...)\r\n\r\nThat is easy. The name of the \"`Branch`\" (\"`BranchElement`\") will end with a \"`.`\" (because it is the original branch name that was set by the user when the branch was created).\r\n\r\n```cpp\r\n{\r\n  TObject o;\r\n  TTree *t = new TTree(\"t\", \"t\");\r\n  t->Branch(\"dumb\", &o);\r\n  t->Branch(\"nice.\", &o);\r\n  t->Print();\r\n}\r\n```",
+     "createdAt":"2023-12-14T07:47:00Z",
+     "number":7850616,
+     "replies":{
+      "nodes":[
+       {
+        "author":{
+         "login":"jpivarski"
+        },
+        "body":"Thanks! I should have said, \"most of the ROOT files that I've encountered.\"\r\n\r\nSince users can set the names of the top-most TBranches (directly below the TTree and not nested under any other TBranch), I suppose that it's a trailing dot (`.`) on this top-most TBranch, right?\r\n\r\nWe could, in Uproot, expand nested TBranch names to fully qualified names (by prepending parent names) _only if_ the top-most parent name does not end in a trailing dot. That would effectively make every Pandas DataFrame look the same, whether the trailing dot was used in the ROOT-writing process or not.",
+        "createdAt":"2023-12-14T18:37:45Z",
+        "number":7856748
+       }
+      ],
+      "totalCount":1
+     }
+    },
+    {
+     "author":{
+      "login":"JacekHoleczek"
+     },
+     "body":"> I suppose that it's a trailing dot (`.`) on this top-most TBranch, right?\r\n\r\nYes, as shown in my micro example (in my previous post).\r\nSearch for (all) occurrences of \"`dot`\" in the [`TTree`](https://root.cern/doc/master/classTTree.html) class description (several methods mention it).\r\n",
+     "createdAt":"2023-12-14T21:30:18Z",
+     "number":7858014,
+     "replies":{
+      "nodes":[
+       {
+        "author":{
+         "login":"jpivarski"
+        },
+        "body":"(I was checking to see that the top-most branch is indeed special\u2014this isn't something we should look for in the middle of nested TBranches.)\r\n\r\nThanks!",
+        "createdAt":"2023-12-14T21:45:44Z",
+        "number":7858138
+       }
+      ],
+      "totalCount":1
+     }
+    }
+   ],
+   "totalCount":3
+  },
+  "createdAt":"2023-12-07T16:52:26Z",
+  "number":1057,
+  "title":"`arrays` dropping (or overwriting?) branches with similar names",
+  "url":"https://github.com/scikit-hep/uproot5/discussions/1057"
+ },
+ {
+  "author":{
+   "login":"jpivarski"
+  },
+  "body":"This is the first version of Uproot that strictly depends on fsspec, which is now used for all file access (local and remote).\r\n\r\n## New features\r\n\r\n* feat: improve uri scheme parsing with list of available schemes from `fsspec` by @lobis in https://github.com/scikit-hep/uproot5/pull/1009\r\n* feat: use only loop executor for `fsspec` source by @lobis in https://github.com/scikit-hep/uproot5/pull/999\r\n* feat: modify how multipart bytes header is built (no space) on http source by @lobis in https://github.com/scikit-hep/uproot5/pull/1018\r\n* feat: basic fsspec writing by @lobis in https://github.com/scikit-hep/uproot5/pull/1016\r\n* feat: correct fsspec source serialization by @lobis in https://github.com/scikit-hep/uproot5/pull/1033\r\n* feat: refactoring the AwkwardForth code-discovery process by @jpivarski in https://github.com/scikit-hep/uproot5/pull/943\r\n* feat(draft): add `report=` argument for `uproot.dask`; trigger report collection (take 2!) by @douglasdavis in https://github.com/scikit-hep/uproot5/pull/1058\r\n* feat: fsspec as required dependency by @lobis in https://github.com/scikit-hep/uproot5/pull/1022\r\n\r\n## Bug-fixes and performance\r\n\r\n* fix: url and object splitting for local files by @lobis in https://github.com/scikit-hep/uproot5/pull/1007\r\n* fix: s3 source options and repr by @lobis in https://github.com/scikit-hep/uproot5/pull/1024\r\n* fix: processing of `pathlib.Path` argument for writing by @lobis in https://github.com/scikit-hep/uproot5/pull/1031\r\n* fix: multithreaded file source breaks interpretation by @lobis in https://github.com/scikit-hep/uproot5/pull/1036\r\n* fix: `const std::string` identification by @HaarigerHarald in https://github.com/scikit-hep/uproot5/pull/1043\r\n* fix: correct typo in fsspec globbing by @lgray in https://github.com/scikit-hep/uproot5/pull/1067\r\n\r\n## Other\r\n\r\n* test: local http server for tests by @lobis in https://github.com/scikit-hep/uproot5/pull/1010\r\n* test: testing sshfs with local ssh server by @lobis in https://github.com/scikit-hep/uproot5/pull/1013\r\n* test: use `paramiko` for ssh instead of `sshfs` by @lobis in https://github.com/scikit-hep/uproot5/pull/1014\r\n* test: cover more fsspec backends by @lobis in https://github.com/scikit-hep/uproot5/pull/1015\r\n* test: review skipped tests (networking timeouts) by @lobis in https://github.com/scikit-hep/uproot5/pull/1027\r\n* test: s3fs pytest unraisable exception by @lobis in https://github.com/scikit-hep/uproot5/pull/1012\r\n* test: remove hyphens from test names (PyCharm compatibility) by @lobis in https://github.com/scikit-hep/uproot5/pull/1053\r\n* test: zstandard should be a test dependency, and xxhash goes with lz4. by @jpivarski in https://github.com/scikit-hep/uproot5/pull/1056\r\n* test: do not skip aiohttp tests for Python 3.12 - update pytest rerun settings by @lobis in https://github.com/scikit-hep/uproot5/pull/1064\r\n* docs: add HaarigerHarald as a contributor for code by @allcontributors in https://github.com/scikit-hep/uproot5/pull/1049\r\n* chore: update pre-commit hooks by @pre-commit-ci in https://github.com/scikit-hep/uproot5/pull/1005\r\n* chore: replace some old code (python 2) by @lobis in https://github.com/scikit-hep/uproot5/pull/1020\r\n* chore: use ruff to import annotations by @lobis in https://github.com/scikit-hep/uproot5/pull/1042\r\n* chore: update pre-commit hooks by @pre-commit-ci in https://github.com/scikit-hep/uproot5/pull/1019\r\n* chore(deps): bump conda-incubator/setup-miniconda from 2 to 3 by @dependabot in https://github.com/scikit-hep/uproot5/pull/1051\r\n* chore: update pre-commit hooks by @pre-commit-ci in https://github.com/scikit-hep/uproot5/pull/1060\r\n* chore(deps): bump actions/setup-python from 4 to 5 by @dependabot in https://github.com/scikit-hep/uproot5/pull/1059\r\n\r\n## New Contributors\r\n* @HaarigerHarald made their first contribution in https://github.com/scikit-hep/uproot5/pull/1043\r\n\r\n**Full Changelog**: https://github.com/scikit-hep/uproot5/compare/v5.1.2...v5.2.0\n\n<hr /><em>This discussion was created from the release <a href='https://github.com/scikit-hep/uproot5/releases/tag/v5.2.0'>Version 5.2.0</a>.</em>",
+  "comments":{
+   "nodes":[],
+   "totalCount":0
+  },
+  "createdAt":"2023-12-14T15:37:52Z",
+  "number":1068,
+  "title":"Version 5.2.0",
+  "url":"https://github.com/scikit-hep/uproot5/discussions/1068"
+ },
+ {
+  "author":{
+   "login":"Renal-Of-Loon"
+  },
+  "body":"Greetings all,\r\n\r\nI am trying to access some data in a root file which is under the form of a TMap (named \"parameters\"). When trying to access it with `myfile[\"parameters\"]` I only get `Unknown TMap at 0x.....`, using `myfile[\"parameters\"].all_members` returns a 0 length dict.\r\n\r\nThe class does however appear in `myfile.classnames()` as `'parameters;1':'TMap'`\r\n\r\nIs there a specific way to grab data from this structure or no with the library?\r\n\r\nThank you kindly.",
+  "comments":{
+   "nodes":[
+    {
+     "author":{
+      "login":"jpivarski"
+     },
+     "body":"\"Unknown\" means it couldn't find StreamerInfo for this type or otherwise couldn't get the information about how to deserialize it. (The type names, e.g. in `myfile.classnames()`, are always available.)\r\n\r\nWhat does [TFile::ShowStreamerInfo](https://root.cern.ch/doc/master/classTFile.html#aa57bbc608f1e573cccb2c5637e441cfc) show you in ROOT? Is the `TMap` definition among the streamers of that file?",
+     "createdAt":"2023-12-14T22:20:03Z",
+     "number":7858357,
+     "replies":{
+      "nodes":[
+       {
+        "author":{
+         "login":"Renal-Of-Loon"
+        },
+        "body":"It doesn't seem to be in there, I've made a copy-paste of the output [on pastebin](https://pastebin.com/hkd7kcAU)\r\n\r\nWould this be something missing in the generation of the ROOT file? I believe the relevant lines in the generation of the root file should be the following:\r\n```c++\r\n#include \"TMap.h\"\r\n//...\r\nparameters_ = new TMap();\r\n//...\r\nvoid SimulationPlan::setParametersTMap(Controls *controls) {\r\n  for (auto i : controls->vm) {\r\n    TObjString *s1 = new TObjString(i.first.c_str());\r\n    TObjString *s2 =\r\n        new TObjString(controls->parameterToString(i.first).c_str());\r\n    parameters_->Add((TObject *)s1, (TObject *)s2);\r\n  }\r\n}\r\n//...\r\nTFile *d = new TFile(outputFile_.c_str(), \"recreate\");\r\n//...\r\nd->WriteObject(parameters_, \"parameters\");\r\n```\r\nI realize this is very fragmented, but the goal was simply to create a Key:value map for some simulation parameters\r\n",
+        "createdAt":"2023-12-14T22:42:33Z",
+        "number":7858468
+       },
+       {
+        "author":{
+         "login":"jpivarski"
+        },
+        "body":"I see that the `TMap` is not in the streamers, so the file is not fully self-describing. ROOT has `TMap` built in, so this missing streamer may be overlooked. I don't know how to coax ROOT to include that streamer in the file, either. I've seen similar issues like this, usually involving hadd.\r\n\r\nI see that all of your key-value pairs are strings. You can put a `TObjString` directly into a directory. Suppose you write the `parameters` as JSON? Then you can use `json.loads` to decode it on the Python side.\r\n\r\nIncidentally, `TObjString` is one of the few types that Uproot can also write. I used it as a test example in development because it's so simple.",
+        "createdAt":"2023-12-14T23:00:41Z",
+        "number":7858566
+       },
+       {
+        "author":{
+         "login":"Renal-Of-Loon"
+        },
+        "body":"These values do end up eventually as a python dictionary when pulled from the root file yeah (ultimately stored in another format but it does go through json in the process). The origin of the parameters actually come in part from a BOOST parameter file, and others are computed in-process. The idea was to keep everything in just the one .root file to avoid many files hanging around.\r\n\r\nI am not entirely certain what you mean by \"You can put a TObjString directly into a directory\" however. I imagine this is to do with a TDirectory? I'm afraid I'm not overly familiar with ROOT beyond the very (very) basics.",
+        "createdAt":"2023-12-14T23:08:51Z",
+        "number":7858620
+       },
+       {
+        "author":{
+         "login":"jpivarski"
+        },
+        "body":"You used\r\n\r\n```c++\r\nd->WriteObject(parameters_, \"parameters\");\r\n```\r\n\r\nto write the `parameters_` TMap in directory `d` with name `\"parameters\"`. If `parameters_` were a `TObjString`, I think you would be able to write that just as easily.\r\n\r\nI just checked, and yes you can:\r\n\r\n```c++\r\nroot [0] TFile* d = new TFile(\"tmp.root\", \"RECREATE\")\r\n(TFile *) 0x55ebe0364bb0\r\nroot [1] TObjString* parameters_ = new TObjString(\"hello\")\r\n(TObjString *) 0x55ebe19ad570\r\nroot [2] d->WriteObject(parameters_, \"parameters\")\r\n(int) 95\r\nroot [3] d->Close()\r\n```\r\n\r\n```python\r\n>>> import uproot\r\n>>> file = uproot.open(\"tmp.root\")\r\n>>> file[\"parameters\"]\r\n<TObjString 'hello' at 0x7fd911854c80>\r\n```\r\n\r\nSo if instead of writing `\"hello\"`, you wrote a JSON document, you'd be able to load that as a Python dict with `json.loads`.",
+        "createdAt":"2023-12-14T23:34:05Z",
+        "number":7858764
+       },
+       {
+        "author":{
+         "login":"Renal-Of-Loon"
+        },
+        "body":"Oh that's a great idea. Thank you kindly for the work and effort, I really appreciate it!",
+        "createdAt":"2023-12-15T00:22:47Z",
+        "number":7859001
+       },
+       {
+        "author":{
+         "login":"Renal-Of-Loon"
+        },
+        "body":"I just figured I'd follow up for closure. This did end up working with minimal rework and entirely as expected. Thank you again for the easy workaround and clear example; greatly appreciate it!",
+        "createdAt":"2023-12-22T03:39:35Z",
+        "number":7924115
+       }
+      ],
+      "totalCount":6
+     }
+    },
+    {
+     "author":{
+      "login":"JacekHoleczek"
+     },
+     "body":"[No streamer info saved for TMaps?](https://root-forum.cern.ch/t/no-streamer-info-saved-for-tmaps/32728)",
+     "createdAt":"2023-12-16T10:59:20Z",
+     "number":7870431,
+     "replies":{
+      "nodes":[
+       {
+        "author":{
+         "login":"jpivarski"
+        },
+        "body":"Thanks for the reference! Okay, then this is one that we could hard-code, like TList.",
+        "createdAt":"2023-12-16T11:58:59Z",
+        "number":7870652
+       },
+       {
+        "author":{
+         "login":"JacekHoleczek"
+        },
+        "body":"BTW. You may also be interested in this: [`StreamerInfo is not stored in TFile with \"update\" mode`](https://root-forum.cern.ch/t/streamerinfo-is-not-stored-in-tfile-with-update-mode/57383)\r\nAnd maybe also this: [`\"Error in <TList::Clear>: A list is accessing an object already deleted (list name = TList)\" when opening a file created by ROOT 6.30, using ROOT 6.14.09`](https://root-forum.cern.ch/t/error-in-tlist-clear-a-list-is-accessing-an-object-already-deleted-list-name-tlist-when-opening-a-file-created-by-root-6-30-using-root-6-14-09/57588)\r\n",
+        "createdAt":"2023-12-16T12:35:32Z",
+        "number":7870804
+       }
+      ],
+      "totalCount":2
+     }
+    }
+   ],
+   "totalCount":2
+  },
+  "createdAt":"2023-12-14T22:13:05Z",
+  "number":1069,
+  "title":"Accessing a TMap class",
+  "url":"https://github.com/scikit-hep/uproot5/discussions/1069"
+ }
+]
