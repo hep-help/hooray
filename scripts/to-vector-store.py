@@ -161,7 +161,7 @@ vectordb = Chroma.from_documents(
     documents=documents,
     embedding=embedding,
     collection_name="hep-help",
-    persist_directory="hep-help-db",
+    persist_directory="./hep-help-db",
 )
 
 print(f"Filled database with documents")
