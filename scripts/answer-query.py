@@ -1,30 +1,34 @@
-import re
-import sys
+import json
 import logging
 import math
+import re
+import sys
 from datetime import datetime
 
-from langchain.callbacks import get_openai_callback
+import openai
+from langchain_core.documents import Document
+from langchain_community.callbacks import get_openai_callback
 from langchain_openai import OpenAIEmbeddings
 from langchain_community.vectorstores import Chroma
 from langchain.retrievers.multi_query import MultiQueryRetriever
 from langchain_openai import ChatOpenAI
 
+
 def format_metadata(metadata):
     m = metadata
-    suffix = f" ({datetime.fromisoformat(m['timestamp']).strftime('%d %B, %Y').lstrip('0')})"
+    prefix = f"**{datetime.fromisoformat(m['timestamp']).strftime('%d %B, %Y').lstrip('0')}:** "
     if metadata["type"] == "github-issue":
-        return f"GitHub issue [{m['github-repo']}#{m['github-issue-number']}]({m['url']}), {m['github-issue-title']}{suffix}"
+        return f"{prefix}GitHub issue [{m['github-repo']}#{m['github-issue-number']}]({m['url']}), {m['github-issue-title']}"
     elif metadata["type"] == "github-issue-comment":
-        return f"GitHub issue [{m['github-repo']}#{m['github-issue-number']} (comment)]({m['url']}), {m['github-issue-title']}{suffix}"
+        return f"{prefix}GitHub issue [{m['github-repo']}#{m['github-issue-number']} (comment)]({m['url']}), {m['github-issue-title']}"
     elif metadata["type"] == "github-discussion":
-        return f"GitHub discussion [{m['github-repo']}#{m['github-discussion-number']}]({m['url']}), {m['github-discussion-title']}{suffix}"
+        return f"{prefix}GitHub discussion [{m['github-repo']}#{m['github-discussion-number']}]({m['url']}), {m['github-discussion-title']}"
     elif metadata["type"] == "github-discussion-comment":
-        return f"GitHub discussion [{m['github-repo']}#{m['github-discussion-number']} (comment)]({m['url']}), {m['github-discussion-title']}{suffix}"
+        return f"{prefix}GitHub discussion [{m['github-repo']}#{m['github-discussion-number']} (comment)]({m['url']}), {m['github-discussion-title']}"
     elif metadata["type"] == "github-discussion-comment-reply":
-        return f"GitHub discussion [{m['github-repo']}#{m['github-discussion-number']} (reply)]({m['url']}), {m['github-discussion-title']}{suffix}"
+        return f"{prefix}GitHub discussion [{m['github-repo']}#{m['github-discussion-number']} (reply)]({m['url']}), {m['github-discussion-title']}"
     else:
-        return f"[{m['url']}]({m['url']})" + suffix
+        return f"{prefix}[{m['url']}]({m['url']})"
 
 
 if __name__ == "__main__":
@@ -54,90 +58,95 @@ if __name__ == "__main__":
             retriever=basic_retriever, llm=multiquery_llm
         )
 
-        matching_urls = set()
-        matching_documents = []
+        unique_urls = set()
+        unique_documents = []
         logger.info("Getting 5 documents by direct similarity test")
         for document in basic_retriever.get_relevant_documents(query=query):
-            if document.metadata["url"] not in matching_urls:
-                matching_urls.add(document.metadata["url"])
-                matching_documents.append(document)
+            if document.metadata["url"] not in unique_urls:
+                unique_urls.add(document.metadata["url"])
+                unique_documents.append(document)
         logger.info("Getting as many as 15 more by letting the LLM vary the query")
         for document in retriever.get_relevant_documents(query=query):
-            if document.metadata["url"] not in matching_urls:
-                matching_urls.add(document.metadata["url"])
-                matching_documents.append(document)
+            if document.metadata["url"] not in unique_urls:
+                unique_urls.add(document.metadata["url"])
+                unique_documents.append(document)
 
-        logger.info(f"Found a total of {len(matching_documents)} unique documents")
+        logger.info(f"Found a total of {len(unique_documents)} unique documents")
+
+        matching_documents = []
+        for document in unique_documents:
+            if document.metadata["type"] == "github-issue":
+                m = document.metadata
+                filename = f"./hep-help-db/raw-documents/{m['type']}/{m['github-repo']}/{m['github-issue-number']}.json"
+            elif document.metadata["type"] == "github-discussion":
+                m = document.metadata
+                filename = f"./hep-help-db/raw-documents/{m['type']}/{m['github-repo']}/{m['github-discussion-number']}.json"
+            else:
+                continue
+
+            with open(filename) as file:
+                data = json.load(file)
+                page_content = data.pop("page_content")
+                matching_documents.append(Document(page_content=page_content, metadata=data))
+
+        logger.info(f"Which correspond to {len(matching_documents)} raw documents")
 
         logger.info("Asking an LLM to rank the documents by usefulness")
-        ranking_llm = ChatOpenAI(temperature=0.5)
-
-        numer = [0] * len(matching_documents)
-        denom = [0] * len(matching_documents)
-        for trial in range(1):
-            response = ranking_llm.invoke(
-                "\n\n".join(
-                    f'<message number="{i + 1}">\n{x.page_content}\n</message>'
-                    for i, x in enumerate(matching_documents)
-                )
-                + f"\n\n<question>{query}</question>\n\nInstructions: For each "
-                'of the numbered messages in <message number="NUMBER"> tags, '
-                "provide an integer score between 0 and 100 that characterizes "
-                "how useful the message would be to me in finding the answer to the "
-                "question in <question> tags. Return your responses as a "
-                "space-delimited sequence of message NUMBER=SCORE pairs and nothing else."
-            )
-            logger.info(f"LLM response: {response.content}")
-
-            ranking = [None] * len(matching_documents)
-            for index, score in re.findall("([0-9]+)\s*=\s*([0-9]+)", response.content):
-                good_index = int(index) - 1
-                if 0 <= good_index < len(ranking):
-                    ranking[good_index] = int(score)
-
-            for i in range(len(matching_documents)):
-                if ranking[i] is not None:
-                    numer[i] += ranking[i]
-                    denom[i] += 1
-
-        final_ranking = [float("-inf")] * len(matching_documents)
-        for i in range(len(matching_documents)):
-            if denom[i] != 0:
-                final_ranking[i] = round(numer[i] / denom[i])
-
-        logger.info(f"final ranking: {final_ranking}")
-
-        ranked_documents = list(zip(final_ranking, matching_documents))
-        ranked_documents.sort(key=lambda pair: -pair[0])
-
-        logger.info("Asking an LLM to summarize the usefulness of each document")
-        summarizing_llm = ChatOpenAI(temperature=0.5)
+        ranking_summarizing_llm = ChatOpenAI(temperature=0.5)
 
         ranked_documents_with_summaries = []
-        for score, document in ranked_documents:
-            if math.isfinite(score):
-                score = f"{score:.0f}"
-                response = summarizing_llm.invoke(
-                    f"<message>\n{document.page_content}\n</message>\n\n"
-                    f"<question>\n{query}\n</question>\n\nInstructions: Given the "
-                    f"message in <message> tags, explain whether this message will "
-                    "help me find an answer to my question in <question> tags, "
-                    "and if so, how I can use specific examples in that message. "
-                    "Respond with only a few brief sentences, no more than 100 words."
-                )
-                logger.info(f"LLM response: {response.content}")
-            else:
-                score = "_(unranked)_"
-                response = None
+        for document in matching_documents:
+            page_content = document.page_content
 
-            ranked_documents_with_summaries.append(
-                (score, document, "" if response is None else response.content)
-            )
+            while True:
+                try:
+                    response = ranking_summarizing_llm.invoke(
+                        f"<conversation>\n{page_content}\n</conversation>\n\n"
+                        f"<question>{query}</question>\n\nInstructions: Given the "
+                        "conversation in <conversation> tags, determine whether any part "
+                        "of it will help me find an answer to my question in <question> "
+                        "tags, and if so, how I can use specific examples in that "
+                        "conversation and what I should look for. Also, provide an "
+                        "integer score between 0 and 100 that characterizes how well "
+                        "the conversation addresses my question. The score should be "
+                        "greater than 75 if it directly addresses my question, it should "
+                        "be between 25 and 75 if it doesn't directly address my question "
+                        "but contains information that I can use, and the score should "
+                        "be below 25 if it doesn't contain anything useful. Return your "
+                        "response in the format \"Score: NUMBER out of 100\", followed by a newline and a few brief "
+                        "sentences (no more than 100 words) explaining how the conversation "
+                        "is useful and what examples I should look for in the conversation "
+                        "to help answer to my question."
+                    )
+                except openai.BadRequestError:
+                    page_content = page_content[:len(page_content) // 2]
+                    if len(page_content) < 5000:
+                        response = None
+                        break
+                else:
+                    break
+
+            if response is None:
+                continue
+
+            logger.info(f"LLM response: {response.content}")
+
+            score = float("-inf")
+            score_match = re.search("([0-9]+)", response.content)
+            if score_match is not None:
+                score = int(score_match.group(1))
+
+            if score >= 25:
+                ranked_documents_with_summaries.append(
+                    (score, document, response.content)
+                )
 
         logger.info(str(cb))
 
+    ranked_documents_with_summaries.sort(key=lambda pair: -pair[0])
+
     final_document = "### Potentially useful sources\n\n" + "\n\n".join(
-        f"**Score: {score}%:** {format_metadata(document.metadata)}\n\n{summary}"
+        f"{format_metadata(document.metadata)}\n\n{summary}"
         for score, document, summary in ranked_documents_with_summaries
     )
     print("\n\n------------------------------------------------\n\n")
