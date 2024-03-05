@@ -31,5 +31,7 @@ jobs:
           APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}
         run: |
           echo $APP_PRIVATE_KEY > ./key.pem
+          ls -lh
+          wc ./key.pem
           export APP_TOKEN=`python scripts/get-app-token.py`
           curl -v -X POST -H "Authorization: bearer $APP_TOKEN" -H "Content-Type: application/json" -d '{"query": "mutation { addDiscussionComment(input: {body: \"This is a test.\" discussionId: \"$DISCUSSION_ID\" clientMutationId: \"hep-helper\"}) { clientMutationId comment { id body } } }"}' https://api.github.com/graphql
