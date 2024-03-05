@@ -9,6 +9,9 @@ jobs:
   to-vector-store:
     name: to-vector-store
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
     steps:
 
       - name: Git checkout
@@ -37,7 +40,7 @@ jobs:
         run: |
           zip -r hep-help-db.zip hep-help-db
 
-      - name: Upload as release file
+      - name: Upload as release asset
         if: github.event_name == 'release' && github.event.action == 'published'
         uses: softprops/action-gh-release@v1
         with:
