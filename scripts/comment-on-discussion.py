@@ -1,5 +1,6 @@
 import os
 import time
+import json
 
 import jwt
 import requests
@@ -57,8 +58,9 @@ payload = {
     }
 }""" % DISCUSSION_ID
 }
+print(json.dumps(payload, indent=4))
 
 response = requests.post("https://api.github.com/graphql", json=payload)
 print(f"{response.status_code = }")
-print(f"{response.headers = }")
+print(f"{json.dump(response.headers, indent=4) = }")
 print(response.text)
