@@ -1,6 +1,10 @@
-import jwt
+import os
 import time
+
+import jwt
 import requests
+
+DISCUSSION_ID = os.environ["DISCUSSION_ID"]
 
 APP_ID = "849365"
 PRIVATE_KEY_PATH = "./key.pem"
@@ -34,4 +38,24 @@ def get_installation_token(jwt, installation_id):
 jwt_token = generate_jwt(APP_ID, PRIVATE_KEY_PATH)
 installation_id = "48061001"
 installation_token = get_installation_token(jwt_token, installation_id)
-print(installation_token)
+
+headers = {
+    "Authorization": f"bearer {installation_token}",
+    "Content-Type": "application/json",
+}
+
+payload = {
+    "query": """mutation {
+    addDiscussionComment(
+        input: {
+            body: "This is a test."
+            discussionId: "%s"
+            clientMutationId: "hep-helper"
+        }
+    ) {
+        clientMutationId comment { id body }
+    }
+}""".format(DISCUSSION_ID)
+}
+
+response = requests.post("https://api.github.com/graphql", json=payload)
