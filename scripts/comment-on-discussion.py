@@ -55,7 +55,7 @@ payload = {
     ) {
         clientMutationId comment { id body }
     }
-}""".format(DISCUSSION_ID)
+}""" % DISCUSSION_ID
 }
 
 response = requests.post("https://api.github.com/graphql", json=payload)
