@@ -2,7 +2,7 @@ name: answer-query
 
 on:
   discussion:
-    types: [created]
+    types: [created, edited]
 
 jobs:
   answer-query:
@@ -12,5 +12,8 @@ jobs:
     steps:
 
       - name: Test
+        shell: bash
+        env:
+          DISCUSSION_BODY: ${{ github.event.discussion.body }}
         run: |
-          echo "hello"
+          echo "You said," $DISCUSSION_BODY
