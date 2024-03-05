@@ -161,9 +161,6 @@ embedding = OpenAIEmbeddings()
 
 print(f"Loaded OpenAIEmbeddings")
 
-# FIXME!
-documents = documents[:10]
-
 vectordb = Chroma.from_documents(
     documents=documents,
     embedding=embedding,
