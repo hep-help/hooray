@@ -35,11 +35,7 @@ jobs:
       - name: Zip vector store
         if: github.event_name == 'release' && github.event.action == 'published'
         run: |
-          zip -r hep-help-db
-
-      - name: tmp debug
-        run: |
-          ls -lh
+          zip -r hep-help-db.zip hep-help-db
 
       - name: Upload as release file
         if: github.event_name == 'release' && github.event.action == 'published'
