@@ -58,7 +58,7 @@ payload = {
     }
 }""" % DISCUSSION_ID
 }
-print(json.dumpss(payload, indent=4))
+print(json.dumps(payload, indent=4))
 
 response = requests.post("https://api.github.com/graphql", json=payload)
 print(f"{response.status_code = }")
