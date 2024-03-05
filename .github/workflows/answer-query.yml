@@ -30,7 +30,7 @@ jobs:
         env:
           APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}
         run: |
-          echo $APP_PRIVATE_KEY > ./key.pem
+          echo "$APP_PRIVATE_KEY" > ./key.pem
           ls -lh
           wc ./key.pem
           export APP_TOKEN=`python scripts/get-app-token.py`
