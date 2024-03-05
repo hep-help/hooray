@@ -1,8 +1,9 @@
 name: to-vector-store
 
 on:
-  - workflow_dispatch
-  - release
+  release:
+    types:
+      - published
 
 jobs:
   to-vector-store:
@@ -23,15 +24,25 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install -r requirements.txt
-          ls -R
 
       - name: Build vector store
         shell: bash
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
-          python scripts/to-vector-store.py
+          python -u scripts/to-vector-store.py
 
-      - name: Quick check
+      - name: Zip vector store
+        if: github.event_name == 'release' && github.event.action == 'published'
         run: |
-          ls -R
+          zip -r hep-help-db
+
+      - name: tmp debug
+        run: |
+          ls -lh
+
+      - name: Upload as release file
+        if: github.event_name == 'release' && github.event.action == 'published'
+        uses: softprops/action-gh-release@v1
+        with:
+          files: hep-help-db.zip
