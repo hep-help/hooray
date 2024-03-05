@@ -59,3 +59,6 @@ payload = {
 }
 
 response = requests.post("https://api.github.com/graphql", json=payload)
+print(f"{response.status_code = }")
+print(f"{response.headers = }")
+print(response.text)
