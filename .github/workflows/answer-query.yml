@@ -1,0 +1,16 @@
+name: answer-query
+
+on:
+  discussion:
+    types: [created]
+
+jobs:
+  answer-query:
+    name: answer-query
+    runs-on: ubuntu-latest
+
+    steps:
+
+      - name: Test
+        run: |
+          echo "hello"
