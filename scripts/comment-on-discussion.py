@@ -41,26 +41,27 @@ installation_id = "48061001"
 installation_token = get_installation_token(jwt_token, installation_id)
 
 headers = {
-    "Authorization": f"bearer {installation_token}",
-    "Content-Type": "application/json",
+    "Authorization": f"token {installation_token}",
+    "Accept": "application/vnd.github+json",
 }
 
+RESPONSE = "This is a test."
+
 payload = {
-    "query": """mutation {
-    addDiscussionComment(
-        input: {
-            body: "This is a test."
-            discussionId: "%s"
-            clientMutationId: "hep-helper"
-        }
-    ) {
-        clientMutationId comment { id body }
-    }
-}""" % DISCUSSION_ID
+    "query": '''mutation AddDiscussionComment {
+                  addDiscussionComment(input: {
+                    discussionId: "%s",
+                    body: "%s"
+                  }) {
+                    comment {
+                      id
+                    }
+                  }
+                }''' % (DISCUSSION_ID, RESPONSE)
 }
 print(json.dumps(payload, indent=4))
 
-response = requests.post("https://api.github.com/graphql", json=payload)
+response = requests.post("https://api.github.com/graphql", json=payload, headers=headers)
 print(f"{response.status_code = }")
-print(f"{json.dumps(response.headers, indent=4) = }")
+print(f"{response.headers = }")
 print(response.text)
