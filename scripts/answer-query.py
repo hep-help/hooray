@@ -149,6 +149,4 @@ if __name__ == "__main__":
         f"{format_metadata(document.metadata)}\n\n{summary}"
         for score, document, summary in ranked_documents_with_summaries
     )
-    print("\n\n------------------------------------------------\n\n")
     print(final_document)
-    print("\n\n------------------------------------------------\n\n")

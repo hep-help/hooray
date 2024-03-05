@@ -11,6 +11,19 @@ jobs:
 
     steps:
 
+      - name: Git checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get vector store
+        shell: bash
+        run: |
+          export LATEST_TAG=`git describe --abbrev=0 --tags`
+          wget https://github.com/hep-help/hooray/releases/download/$LATEST_TAG/hep-help-db.zip
+          unzip hep-help-db.zip
+          ls
+
       - name: Test
         shell: bash
         env:
