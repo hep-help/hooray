@@ -10,6 +10,12 @@ DISCUSSION_ID = os.environ["DISCUSSION_ID"]
 APP_ID = "849365"
 PRIVATE_KEY_PATH = "./key.pem"
 
+TEXT_PATH = "./text.md"
+
+with open(TEXT_PATH) as file:
+    text = file.read()
+
+
 def generate_jwt(app_id, private_key_path):
     # Current time and expiration time
     now = int(time.time())
@@ -45,8 +51,6 @@ headers = {
     "Accept": "application/vnd.github+json",
 }
 
-RESPONSE = "This is a test."
-
 payload = {
     "query": '''mutation AddDiscussionComment {
                   addDiscussionComment(input: {
@@ -57,7 +61,7 @@ payload = {
                       id
                     }
                   }
-                }''' % (DISCUSSION_ID, RESPONSE)
+                }''' % (DISCUSSION_ID, text)
 }
 print(json.dumps(payload, indent=4))
 
@@ -65,3 +69,5 @@ response = requests.post("https://api.github.com/graphql", json=payload, headers
 print(f"{response.status_code = }")
 print(f"{response.headers = }")
 print(response.text)
+
+assert response.status_code == 200

@@ -25,6 +25,21 @@ jobs:
         run: |
           python -m pip install -r requirements.txt
 
+      - name: Get vector store
+        shell: bash
+        run: |
+          export LATEST_TAG=`git describe --abbrev=0 --tags`
+          wget https://github.com/hep-help/hooray/releases/download/$LATEST_TAG/hep-help-db.zip
+          unzip hep-help-db.zip
+
+      - name: Produce response
+        shell: bash
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          DISCUSSION_BODY: ${{ github.event.discussion.body }}
+        run: |
+          echo "$DISCUSSION_BODY" | python scripts/answer-query.py > ./text.md
+
       - name: Post response
         shell: bash
         env:
