@@ -16,12 +16,20 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Test
+      - name: Get Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install -r requirements.txt
+
+      - name: Get permissions
         shell: bash
         env:
-          APP_TOKEN: ${{ secrets.APP_TOKEN }}
-          DISCUSSION_BODY: ${{ github.event.discussion.body }}
-          DISCUSSION_ID: ${{ github.event.discussion.node_id }}
+          APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}
         run: |
-          echo "You said," $DISCUSSION_BODY > output.md
+          echo $APP_PRIVATE_KEY > ./key.pem
+          export APP_TOKEN=`python scripts/get-app-token.py`
           curl -v -X POST -H "Authorization: bearer $APP_TOKEN" -H "Content-Type: application/json" -d '{"query": "mutation { addDiscussionComment(input: {body: \"This is a test.\" discussionId: \"$DISCUSSION_ID\" clientMutationId: \"hep-helper\"}) { clientMutationId comment { id body } } }"}' https://api.github.com/graphql
