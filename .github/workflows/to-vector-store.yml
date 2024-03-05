@@ -1,8 +1,8 @@
 name: to-vector-store
 
 on:
-  workflow_dispatch
-  release
+  - workflow_dispatch
+  - release
 
 jobs:
   to-vector-store:
