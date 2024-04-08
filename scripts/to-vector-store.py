@@ -11,7 +11,7 @@ from langchain_community.vectorstores import Chroma
 github_issues = {}
 
 pr = set()
-for filename in glob.glob("data/github/*/*/issues-*.json"):
+for filename in glob.glob("data-1/data/github/*/*/issues-*.json"):
     repo = "/".join(filename.split("/")[2:4])
 
     print(f"Reading {filename}")
@@ -39,7 +39,7 @@ for filename in glob.glob("data/github/*/*/issues-*.json"):
 
     print(f"        {len(github_issues)} GitHub issues have been loaded")
 
-for filename in glob.glob("data/github/*/*/issue-comments-*.json"):
+for filename in glob.glob("data-1/data/github/*/*/issue-comments-*.json"):
     repo = "/".join(filename.split("/")[2:4])
 
     print(f"Reading {filename}")
@@ -70,7 +70,7 @@ for github_issue in github_issues.values():
 
 github_discussions = {}
 
-for filename in glob.glob("data/github/*/*/discussions-*.json"):
+for filename in glob.glob("data-1/data/github/*/*/discussions-*.json"):
     repo = "/".join(filename.split("/")[2:4])
 
     print(f"Reading {filename}")
